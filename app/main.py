@@ -12,12 +12,13 @@ from app.routes.analysis_results import (
     router as analysis_results_router,
 )
 from app.routes.history import router as history_router
+from app.routes.ai_analysis import router as ai_analysis_router
 
 
 app = FastAPI(
     title="AquaSentinel API",
     description="Backend API for satellite-based water quality intelligence",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 
@@ -40,6 +41,7 @@ app.include_router(alerts_router)
 app.include_router(satellite_observations_router)
 app.include_router(analysis_results_router)
 app.include_router(history_router)
+app.include_router(ai_analysis_router)
 
 
 @app.get("/")
@@ -47,6 +49,7 @@ def root():
     return {
         "message": "AquaSentinel backend is running",
         "status": "ok",
+        "version": "0.3.0",
     }
 
 

@@ -5,7 +5,7 @@ from shapely.geometry import mapping
 from datetime import datetime
 
 from app.database import get_db
-from app.models import Alert, AnalysisResult
+from app.models import Alert, AnalysisResult, SatelliteObservation, WaterBody
 from app.schemas.alert import AlertCreate, AlertResponse
 
 
@@ -21,8 +21,22 @@ def create_alert(
     db: Session = Depends(get_db),
 ):
     # -----------------------------------------------------
-    # Validate referenced analysis result
+    # Validate water-body / analysis chain
     # -----------------------------------------------------
+
+    water_body = (
+        db.query(WaterBody)
+        .filter(WaterBody.id == data.water_body_id)
+        .first()
+    )
+    if water_body is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Water body not found",
+        )
+
+    analysis_result = None
+    observation = None
 
     if data.analysis_id is not None:
         analysis_result = (
@@ -35,6 +49,24 @@ def create_alert(
             raise HTTPException(
                 status_code=404,
                 detail="Analysis result not found",
+            )
+
+        observation = (
+            db.query(SatelliteObservation)
+            .filter(SatelliteObservation.id == analysis_result.observation_id)
+            .first()
+        )
+
+        if observation is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Analysis result points to a missing satellite observation",
+            )
+
+        if observation.water_body_id != data.water_body_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Alert water_body_id must match the analysis observation water body",
             )
 
     # -----------------------------------------------------
