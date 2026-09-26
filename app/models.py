@@ -76,6 +76,7 @@ class WaterBody(Base):
     )
 
 
+
 class Alert(Base):
     __tablename__ = "alerts"
 
@@ -124,6 +125,16 @@ class Alert(Base):
 
     explanation: Mapped[dict | list | None] = mapped_column(
         JSON,
+        nullable=True,
+    )
+
+    # Geographic area affected by this alert.
+    # Stored as a PostGIS polygon using WGS84 coordinates.
+    geometry: Mapped[object | None] = mapped_column(
+        Geometry(
+            geometry_type="POLYGON",
+            srid=4326,
+        ),
         nullable=True,
     )
 

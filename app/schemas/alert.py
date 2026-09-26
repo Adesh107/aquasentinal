@@ -1,6 +1,12 @@
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
+from typing import Literal
+
+
+class PolygonGeometry(BaseModel):
+    type: Literal["Polygon"]
+    coordinates: list[list[list[float]]]
 
 
 class AlertCreate(BaseModel):
@@ -12,6 +18,7 @@ class AlertCreate(BaseModel):
     confidence: float | None = None
     affected_area_km2: float | None = None
     explanation: dict | list | None = None
+    geometry: PolygonGeometry | None = None
     status: str = "active"
 
 

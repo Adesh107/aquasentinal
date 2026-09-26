@@ -1,3 +1,4 @@
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -8,6 +9,7 @@ from shapely.geometry import mapping
 from app.database import get_db
 from app.models import WaterBody
 from app.schemas.water_body import WaterBodyCreate
+
 
 router = APIRouter(
     prefix="/water-bodies",
@@ -150,6 +152,54 @@ def get_nearby_water_bodies(
         })
 
     return response
+
+
+# ---------------------------------------------------------
+# GEOJSON GEOMETRY
+# ---------------------------------------------------------
+
+@router.get("/{water_body_id}/geometry")
+def get_water_body_geometry(
+    water_body_id: int,
+    db: Session = Depends(get_db),
+):
+    water_body = (
+        db.query(WaterBody)
+        .filter(
+            WaterBody.id == water_body_id,
+            WaterBody.active == True,
+        )
+        .first()
+    )
+
+    if water_body is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Water body not found",
+        )
+
+    geometry = mapping(
+        to_shape(water_body.geometry)
+    )
+
+    return {
+        "type": "Feature",
+        "id": water_body.id,
+        "properties": {
+            "name": water_body.name,
+            "type": water_body.type,
+            "district": water_body.district,
+            "state": water_body.state,
+            "area_sq_km": water_body.area_sq_km,
+            "source": water_body.source,
+            "active": water_body.active,
+        },
+        "geometry": {
+            "type": geometry["type"],
+            "coordinates": geometry["coordinates"],
+        },
+    }
+
 
 # ---------------------------------------------------------
 # GET SINGLE WATER BODY
