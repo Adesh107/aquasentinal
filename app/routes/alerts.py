@@ -5,7 +5,7 @@ from shapely.geometry import mapping
 from datetime import datetime
 
 from app.database import get_db
-from app.models import Alert
+from app.models import Alert, AnalysisResult
 from app.schemas.alert import AlertCreate, AlertResponse
 
 
@@ -20,6 +20,27 @@ def create_alert(
     data: AlertCreate,
     db: Session = Depends(get_db),
 ):
+    # -----------------------------------------------------
+    # Validate referenced analysis result
+    # -----------------------------------------------------
+
+    if data.analysis_id is not None:
+        analysis_result = (
+            db.query(AnalysisResult)
+            .filter(AnalysisResult.id == data.analysis_id)
+            .first()
+        )
+
+        if analysis_result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Analysis result not found",
+            )
+
+    # -----------------------------------------------------
+    # Validate and prepare geometry
+    # -----------------------------------------------------
+
     geometry_wkt = None
 
     if data.geometry is not None:
@@ -52,6 +73,10 @@ def create_alert(
 
         geometry_wkt = f"POLYGON(({coordinate_text}))"
 
+    # -----------------------------------------------------
+    # Create alert
+    # -----------------------------------------------------
+
     alert = Alert(
         water_body_id=data.water_body_id,
         analysis_id=data.analysis_id,
@@ -75,8 +100,6 @@ def create_alert(
 # ---------------------------------------------------------
 # GET ALL ALERTS
 # ---------------------------------------------------------
-
-
 
 @router.get("", response_model=list[AlertResponse])
 def get_alerts(
