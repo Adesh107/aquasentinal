@@ -56,7 +56,7 @@ def create_analysis_result(
 
 
 # ---------------------------------------------------------
-# GET ALL ANALYSIS RESULTS
+# GET ALL / FILTERED ANALYSIS RESULTS
 # ---------------------------------------------------------
 
 @router.get(
@@ -64,10 +64,18 @@ def create_analysis_result(
     response_model=list[AnalysisResultResponse],
 )
 def get_analysis_results(
+    observation_id: int | None = None,
     db: Session = Depends(get_db),
 ):
+    query = db.query(AnalysisResult)
+
+    if observation_id is not None:
+        query = query.filter(
+            AnalysisResult.observation_id == observation_id
+        )
+
     return (
-        db.query(AnalysisResult)
+        query
         .order_by(AnalysisResult.created_at.desc())
         .all()
     )
