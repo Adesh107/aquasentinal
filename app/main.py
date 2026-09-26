@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from sqlalchemy import text
-
+from app.routes.water_bodies import router as water_bodies_router
 from app.database import engine
+from app.routes.alerts import router as alerts_router
 
 
 app = FastAPI(
@@ -9,6 +10,9 @@ app = FastAPI(
     description="Backend API for satellite-based water quality intelligence",
     version="0.2.0",
 )
+
+app.include_router(water_bodies_router)
+app.include_router(alerts_router)
 
 
 @app.get("/")

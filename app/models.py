@@ -1,7 +1,14 @@
 from datetime import datetime
 
 from geoalchemy2 import Geometry
-from sqlalchemy import Boolean, DateTime, Float, Integer, String
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    Integer,
+    JSON,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -60,6 +67,70 @@ class WaterBody(Base):
         Boolean,
         nullable=False,
         default=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    water_body_id: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        index=True,
+    )
+
+    analysis_id: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        index=True,
+    )
+
+    date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    indicator: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    severity: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    confidence: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
+    affected_area_km2: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
+    explanation: Mapped[dict | list | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="active",
     )
 
     created_at: Mapped[datetime] = mapped_column(
