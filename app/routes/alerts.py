@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from geoalchemy2.shape import to_shape
 from shapely.geometry import mapping
+from datetime import datetime
 
 from app.database import get_db
 from app.models import Alert
@@ -75,15 +76,27 @@ def create_alert(
 # GET ALL ALERTS
 # ---------------------------------------------------------
 
+
+
 @router.get("", response_model=list[AlertResponse])
 def get_alerts(
+    water_body_id: int | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
     db: Session = Depends(get_db),
 ):
-    return (
-        db.query(Alert)
-        .order_by(Alert.date.desc())
-        .all()
-    )
+    query = db.query(Alert)
+
+    if water_body_id is not None:
+        query = query.filter(Alert.water_body_id == water_body_id)
+
+    if from_date is not None:
+        query = query.filter(Alert.date >= from_date)
+
+    if to_date is not None:
+        query = query.filter(Alert.date <= to_date)
+
+    return query.order_by(Alert.date.desc()).all()
 
 
 # ---------------------------------------------------------
