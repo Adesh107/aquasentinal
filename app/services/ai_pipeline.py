@@ -143,10 +143,12 @@ def run_satellite_analysis(
     )
     baseline_manager.add_observation(record)
 
-    # Quality problems take precedence over baseline availability so the API
-    # does not hide a degraded segmentation behind "insufficient_baseline".
+    # Quality problems and review warnings take precedence over baseline
+    # availability. A warned mask must not silently enter the baseline.
     if not segmentation.quality_report.is_valid:
         pipeline_status = "degraded"
+    elif segmentation.quality_report.status != "ok":
+        pipeline_status = "quality_warning"
     elif baseline.status != "valid":
         pipeline_status = "insufficient_baseline"
     else:
