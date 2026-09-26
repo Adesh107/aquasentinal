@@ -21,6 +21,14 @@ class AIObservationQuality(BaseModel):
     window_widened: bool
     scl_available: bool
 
+    quality_guard_failures: list[str] = Field(default_factory=list)
+    expected_water_pixels: int = Field(default=0, ge=0)
+    overlap_water_pixels: int = Field(default=0, ge=0)
+    detected_inside_expected_pct: float = Field(default=0.0, ge=0.0)
+    expected_coverage_pct: float = Field(default=0.0, ge=0.0)
+    out_of_footprint_pct: float = Field(default=0.0, ge=0.0)
+    spatial_prior_warning: str | None = None
+
 
 class AIAnalyzeResponse(BaseModel):
     schema_version: str
