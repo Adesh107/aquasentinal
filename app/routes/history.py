@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -14,6 +16,8 @@ router = APIRouter(
 @router.get("/{water_body_id}/timeline")
 def get_water_body_timeline(
     water_body_id: int,
+    from_date: datetime | None = Query(default=None),
+    to_date: datetime | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     water_body = (
@@ -28,11 +32,32 @@ def get_water_body_timeline(
             detail="Water body not found",
         )
 
-    observations = (
+    if from_date is not None and to_date is not None:
+        if from_date > to_date:
+            raise HTTPException(
+                status_code=400,
+                detail="from_date must be before or equal to to_date",
+            )
+
+    query = (
         db.query(SatelliteObservation)
         .filter(
             SatelliteObservation.water_body_id == water_body_id
         )
+    )
+
+    if from_date is not None:
+        query = query.filter(
+            SatelliteObservation.observation_date >= from_date
+        )
+
+    if to_date is not None:
+        query = query.filter(
+            SatelliteObservation.observation_date <= to_date
+        )
+
+    observations = (
+        query
         .order_by(
             SatelliteObservation.observation_date.asc()
         )
