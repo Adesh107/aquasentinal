@@ -64,6 +64,7 @@ class MaskQualityReport:
     expected_coverage_pct: float = 0.0
     out_of_footprint_pct: float = 0.0
     spatial_prior_warning: Optional[str] = None
+    quality_warnings: List[str] = field(default_factory=list)
 
     failure_reasons: List[str] = field(default_factory=list)
 
