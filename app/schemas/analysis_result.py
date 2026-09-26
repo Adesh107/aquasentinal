@@ -20,10 +20,10 @@ class AnalysisData(BaseModel):
 
     mode: str | None = None
     processing_version: str | None = None
-    calibration_status: dict[str, str] = {}
+    calibration_status: dict[str, str] = Field(default_factory=dict)
     observation_quality: dict | None = None
-    individual_scores: dict[str, float] = {}
-    evidence: list[str] = []
+    individual_scores: dict[str, float] = Field(default_factory=dict)
+    evidence: list[str] = Field(default_factory=list)
     geojson: dict | None = None
 
 
