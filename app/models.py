@@ -76,6 +76,62 @@ class WaterBody(Base):
     )
 
 
+class SatelliteObservation(Base):
+    __tablename__ = "satellite_observations"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    water_body_id: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        index=True,
+    )
+
+    satellite: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    observation_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    scene_id: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+    )
+
+    cloud_percentage: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
+    quality_score: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
+    source_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    observation_metadata: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
 
 class Alert(Base):
     __tablename__ = "alerts"
