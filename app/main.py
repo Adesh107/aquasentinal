@@ -10,6 +10,8 @@ from app.routes.satellite_observations import (
 from app.routes.analysis_results import (
     router as analysis_results_router,
 )
+from app.routes.history import router as history_router
+
 
 app = FastAPI(
     title="AquaSentinel API",
@@ -21,6 +23,7 @@ app.include_router(water_bodies_router)
 app.include_router(alerts_router)
 app.include_router(satellite_observations_router)
 app.include_router(analysis_results_router)
+app.include_router(history_router)
 
 
 @app.get("/")
