@@ -25,6 +25,25 @@ def validate_date_range(
             )
 
 
+def get_water_body_or_404(
+    water_body_id: int,
+    db: Session,
+) -> WaterBody:
+    water_body = (
+        db.query(WaterBody)
+        .filter(WaterBody.id == water_body_id)
+        .first()
+    )
+
+    if water_body is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Water body not found",
+        )
+
+    return water_body
+
+
 def get_observations_for_water_body(
     water_body_id: int,
     from_date: datetime | None,
@@ -85,6 +104,8 @@ def build_analysis_snapshot(
         "observation_id": observation.id,
         "observation_date": observation.observation_date,
         "analysis_id": analysis.id,
+        "model_name": analysis.model_name,
+        "model_version": analysis.model_version,
         "turbidity": data.get("turbidity"),
         "chlorophyll": data.get("chlorophyll"),
         "anomaly_score": data.get("anomaly_score"),
@@ -93,6 +114,10 @@ def build_analysis_snapshot(
             False,
         ),
         "confidence": data.get("confidence"),
+        "evidence": data.get(
+            "evidence",
+            [],
+        ),
     }
 
 
@@ -103,17 +128,7 @@ def get_water_body_timeline(
     to_date: datetime | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    water_body = (
-        db.query(WaterBody)
-        .filter(WaterBody.id == water_body_id)
-        .first()
-    )
-
-    if water_body is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Water body not found",
-        )
+    get_water_body_or_404(water_body_id, db)
 
     observations = get_observations_for_water_body(
         water_body_id,
@@ -149,21 +164,19 @@ def get_water_body_timeline(
         }
 
         if latest_analysis is not None:
-            data = latest_analysis.analysis_data
-
             entry.update({
                 "analysis_id": latest_analysis.id,
                 "model_name": latest_analysis.model_name,
                 "model_version": latest_analysis.model_version,
-                "turbidity": data.get("turbidity"),
-                "chlorophyll": data.get("chlorophyll"),
-                "anomaly_score": data.get("anomaly_score"),
-                "anomaly_detected": data.get(
+                "turbidity": latest_analysis.analysis_data.get("turbidity"),
+                "chlorophyll": latest_analysis.analysis_data.get("chlorophyll"),
+                "anomaly_score": latest_analysis.analysis_data.get("anomaly_score"),
+                "anomaly_detected": latest_analysis.analysis_data.get(
                     "anomaly_detected",
                     False,
                 ),
-                "confidence": data.get("confidence"),
-                "evidence": data.get(
+                "confidence": latest_analysis.analysis_data.get("confidence"),
+                "evidence": latest_analysis.analysis_data.get(
                     "evidence",
                     [],
                 ),
@@ -181,17 +194,7 @@ def get_water_body_trend(
     to_date: datetime | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    water_body = (
-        db.query(WaterBody)
-        .filter(WaterBody.id == water_body_id)
-        .first()
-    )
-
-    if water_body is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Water body not found",
-        )
+    get_water_body_or_404(water_body_id, db)
 
     observations = get_observations_for_water_body(
         water_body_id,
@@ -287,17 +290,7 @@ def get_water_body_comparison(
     to_date: datetime | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    water_body = (
-        db.query(WaterBody)
-        .filter(WaterBody.id == water_body_id)
-        .first()
-    )
-
-    if water_body is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Water body not found",
-        )
+    get_water_body_or_404(water_body_id, db)
 
     observations = get_observations_for_water_body(
         water_body_id,
@@ -375,4 +368,52 @@ def get_water_body_comparison(
                 latest["confidence"],
             ),
         },
+    }
+
+
+@router.get("/{water_body_id}/anomaly-history")
+def get_water_body_anomaly_history(
+    water_body_id: int,
+    from_date: datetime | None = Query(default=None),
+    to_date: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    get_water_body_or_404(water_body_id, db)
+
+    observations = get_observations_for_water_body(
+        water_body_id,
+        from_date,
+        to_date,
+        db,
+    )
+
+    anomalies = []
+
+    for observation in observations:
+        latest_analysis = get_latest_analysis(
+            observation.id,
+            db,
+        )
+
+        if latest_analysis is None:
+            continue
+
+        data = latest_analysis.analysis_data
+
+        if not data.get("anomaly_detected", False):
+            continue
+
+        anomalies.append(
+            build_analysis_snapshot(
+                observation,
+                latest_analysis,
+            )
+        )
+
+    return {
+        "water_body_id": water_body_id,
+        "from_date": from_date,
+        "to_date": to_date,
+        "anomaly_count": len(anomalies),
+        "anomalies": anomalies,
     }
