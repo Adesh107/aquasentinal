@@ -22,6 +22,7 @@ class AIObservationQuality(BaseModel):
     scl_available: bool
 
     quality_guard_failures: list[str] = Field(default_factory=list)
+    quality_warnings: list[str] = Field(default_factory=list)
     expected_water_pixels: int = Field(default=0, ge=0)
     overlap_water_pixels: int = Field(default=0, ge=0)
     detected_inside_expected_pct: float = Field(default=0.0, ge=0.0)
