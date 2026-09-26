@@ -13,6 +13,68 @@ router = APIRouter(
 )
 
 
+def validate_date_range(
+    from_date: datetime | None,
+    to_date: datetime | None,
+) -> None:
+    if from_date is not None and to_date is not None:
+        if from_date > to_date:
+            raise HTTPException(
+                status_code=400,
+                detail="from_date must be before or equal to to_date",
+            )
+
+
+def get_observations_for_water_body(
+    water_body_id: int,
+    from_date: datetime | None,
+    to_date: datetime | None,
+    db: Session,
+):
+    validate_date_range(from_date, to_date)
+
+    query = (
+        db.query(SatelliteObservation)
+        .filter(
+            SatelliteObservation.water_body_id == water_body_id
+        )
+    )
+
+    if from_date is not None:
+        query = query.filter(
+            SatelliteObservation.observation_date >= from_date
+        )
+
+    if to_date is not None:
+        query = query.filter(
+            SatelliteObservation.observation_date <= to_date
+        )
+
+    return (
+        query
+        .order_by(
+            SatelliteObservation.observation_date.asc()
+        )
+        .all()
+    )
+
+
+def get_latest_analysis(
+    observation_id: int,
+    db: Session,
+):
+    return (
+        db.query(AnalysisResult)
+        .filter(
+            AnalysisResult.observation_id == observation_id
+        )
+        .order_by(
+            AnalysisResult.created_at.desc()
+        )
+        .first()
+    )
+
+
 @router.get("/{water_body_id}/timeline")
 def get_water_body_timeline(
     water_body_id: int,
@@ -32,50 +94,19 @@ def get_water_body_timeline(
             detail="Water body not found",
         )
 
-    if from_date is not None and to_date is not None:
-        if from_date > to_date:
-            raise HTTPException(
-                status_code=400,
-                detail="from_date must be before or equal to to_date",
-            )
-
-    query = (
-        db.query(SatelliteObservation)
-        .filter(
-            SatelliteObservation.water_body_id == water_body_id
-        )
-    )
-
-    if from_date is not None:
-        query = query.filter(
-            SatelliteObservation.observation_date >= from_date
-        )
-
-    if to_date is not None:
-        query = query.filter(
-            SatelliteObservation.observation_date <= to_date
-        )
-
-    observations = (
-        query
-        .order_by(
-            SatelliteObservation.observation_date.asc()
-        )
-        .all()
+    observations = get_observations_for_water_body(
+        water_body_id,
+        from_date,
+        to_date,
+        db,
     )
 
     timeline = []
 
     for observation in observations:
-        latest_analysis = (
-            db.query(AnalysisResult)
-            .filter(
-                AnalysisResult.observation_id == observation.id
-            )
-            .order_by(
-                AnalysisResult.created_at.desc()
-            )
-            .first()
+        latest_analysis = get_latest_analysis(
+            observation.id,
+            db,
         )
 
         entry = {
@@ -120,3 +151,109 @@ def get_water_body_timeline(
         timeline.append(entry)
 
     return timeline
+
+
+@router.get("/{water_body_id}/trend")
+def get_water_body_trend(
+    water_body_id: int,
+    from_date: datetime | None = Query(default=None),
+    to_date: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    water_body = (
+        db.query(WaterBody)
+        .filter(WaterBody.id == water_body_id)
+        .first()
+    )
+
+    if water_body is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Water body not found",
+        )
+
+    observations = get_observations_for_water_body(
+        water_body_id,
+        from_date,
+        to_date,
+        db,
+    )
+
+    series = []
+    analyzed_observation_count = 0
+    anomaly_count = 0
+
+    turbidity_values = []
+    chlorophyll_values = []
+    anomaly_score_values = []
+
+    for observation in observations:
+        latest_analysis = get_latest_analysis(
+            observation.id,
+            db,
+        )
+
+        point = {
+            "observation_id": observation.id,
+            "observation_date": observation.observation_date,
+            "turbidity": None,
+            "chlorophyll": None,
+            "anomaly_score": None,
+            "anomaly_detected": False,
+            "confidence": None,
+        }
+
+        if latest_analysis is not None:
+            analyzed_observation_count += 1
+            data = latest_analysis.analysis_data
+
+            point.update({
+                "turbidity": data.get("turbidity"),
+                "chlorophyll": data.get("chlorophyll"),
+                "anomaly_score": data.get("anomaly_score"),
+                "anomaly_detected": data.get(
+                    "anomaly_detected",
+                    False,
+                ),
+                "confidence": data.get("confidence"),
+            })
+
+            if point["anomaly_detected"]:
+                anomaly_count += 1
+
+            if point["turbidity"] is not None:
+                turbidity_values.append(point["turbidity"])
+
+            if point["chlorophyll"] is not None:
+                chlorophyll_values.append(point["chlorophyll"])
+
+            if point["anomaly_score"] is not None:
+                anomaly_score_values.append(point["anomaly_score"])
+
+        series.append(point)
+
+    return {
+        "water_body_id": water_body_id,
+        "from_date": from_date,
+        "to_date": to_date,
+        "observation_count": len(observations),
+        "analyzed_observation_count": analyzed_observation_count,
+        "anomaly_count": anomaly_count,
+        "summary": {
+            "turbidity_min": min(turbidity_values) if turbidity_values else None,
+            "turbidity_max": max(turbidity_values) if turbidity_values else None,
+            "chlorophyll_min": min(chlorophyll_values) if chlorophyll_values else None,
+            "chlorophyll_max": max(chlorophyll_values) if chlorophyll_values else None,
+            "anomaly_score_min": (
+                min(anomaly_score_values)
+                if anomaly_score_values
+                else None
+            ),
+            "anomaly_score_max": (
+                max(anomaly_score_values)
+                if anomaly_score_values
+                else None
+            ),
+        },
+        "series": series,
+    }
