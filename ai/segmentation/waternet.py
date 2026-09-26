@@ -173,12 +173,16 @@ class WaterNetSegmenter:
             raw_water_mask &= context_mask
 
         # 2. Morphological Spatial Cleanup
-        # Remove small disconnected noise specks, close tiny shoreline gaps,
-        # and keep components that are anchored to the known footprint or are
-        # sufficiently large and close to it.
+        # Remove small disconnected noise specks, close narrow shoreline gaps,
+        # then adaptively test a modestly larger closing kernel when the
+        # resulting water mask is highly fragmented.
         cleaned_mask = self._morphological_refine(raw_water_mask)
         if expected_mask is not None:
             cleaned_mask = self._anchor_components_to_footprint(
+                cleaned_mask,
+                expected_mask,
+            )
+            cleaned_mask = self._adaptive_fragmentation_refine(
                 cleaned_mask,
                 expected_mask,
             )
@@ -286,6 +290,87 @@ class WaterNetSegmenter:
                 keep_labels[label_id] = True
 
         return keep_labels[labeled]
+
+    def _adaptive_fragmentation_refine(
+        self,
+        mask: np.ndarray,
+        expected_mask: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Try modest morphological closing only when the detected water is
+        fragmented. Select a candidate only when it materially reduces
+        fragmentation while avoiding large area inflation or loss of spatial
+        agreement with the stored footprint.
+        """
+        current_water = int(np.sum(mask))
+        if current_water <= 500:
+            return mask
+
+        current_metrics = self._fragmentation_metrics(mask)
+        if current_metrics["fragmentation_index"] <= self.max_fragmentation_index:
+            return mask
+
+        candidates = []
+        for kernel_size in (5, 7, 9):
+            structure = np.ones((kernel_size, kernel_size), dtype=bool)
+            candidate = ndimage.binary_closing(
+                mask,
+                structure=structure,
+                iterations=1,
+            )
+            candidate = ndimage.binary_fill_holes(candidate)
+
+            # Re-apply the 150 m spatial context and footprint anchoring.
+            context = ndimage.binary_dilation(
+                expected_mask,
+                iterations=max(1, int(round(self.context_buffer_meters / 10.0))),
+            )
+            candidate &= context
+            candidate = self._anchor_components_to_footprint(candidate, expected_mask)
+
+            pixels = int(np.sum(candidate))
+            if pixels <= current_water:
+                # Never select a candidate that only removes water here; it
+                # does not address fragmentation caused by narrow gaps.
+                continue
+
+            inside_pct = (
+                int(np.sum(candidate & expected_mask)) / max(pixels, 1)
+            ) * 100.0
+            area_growth = pixels / max(current_water, 1)
+            metrics = self._fragmentation_metrics(candidate)
+
+            # Bound expansion and demand a meaningful fragmentation improvement.
+            if (
+                inside_pct >= 85.0
+                and area_growth <= 2.0
+                and metrics["fragmentation_index"]
+                < current_metrics["fragmentation_index"] - 0.05
+            ):
+                candidates.append((metrics["fragmentation_index"], pixels, candidate))
+
+        if not candidates:
+            return mask
+
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return candidates[0][2]
+
+    @staticmethod
+    def _fragmentation_metrics(mask: np.ndarray) -> Dict[str, float]:
+        labeled, num_components = ndimage.label(mask)
+        water_pixels = int(np.sum(mask))
+        if num_components == 0 or water_pixels == 0:
+            return {
+                "fragmentation_index": 1.0,
+                "largest_component_ratio": 0.0,
+            }
+
+        sizes = ndimage.sum(mask, labeled, range(1, num_components + 1))
+        largest_ratio = float(np.max(sizes)) / water_pixels
+        return {
+            "fragmentation_index": 1.0 - largest_ratio,
+            "largest_component_ratio": largest_ratio,
+        }
 
     def _rasterize_expected_geometry(
         self,
@@ -436,6 +521,7 @@ class WaterNetSegmenter:
 
         # Run Guard Constraints
         failures: List[str] = []
+        warnings: List[str] = []
         status = "ok"
         is_valid = True
 
@@ -485,6 +571,7 @@ class WaterNetSegmenter:
             expected_coverage_pct=round(expected_coverage_pct, 4),
             out_of_footprint_pct=round(out_of_footprint_pct, 4),
             spatial_prior_warning=spatial_prior_warning,
+            quality_warnings=warnings,
             failure_reasons=failures,
         )
 
