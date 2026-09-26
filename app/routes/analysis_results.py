@@ -45,7 +45,7 @@ def create_analysis_result(
         observation_id=data.observation_id,
         model_name=data.model_name,
         model_version=data.model_version,
-        analysis_data=data.analysis_data,
+        analysis_data=data.analysis_data.model_dump(),
     )
 
     db.add(analysis_result)
@@ -76,6 +76,44 @@ def get_analysis_results(
 
     return (
         query
+        .order_by(AnalysisResult.created_at.desc())
+        .all()
+    )
+
+
+# ---------------------------------------------------------
+# GET ANALYSIS RESULTS FOR A WATER BODY
+# ---------------------------------------------------------
+
+@router.get(
+    "/water-bodies/{water_body_id}/analysis-results",
+    response_model=list[AnalysisResultResponse],
+)
+def get_analysis_results_for_water_body(
+    water_body_id: int,
+    db: Session = Depends(get_db),
+):
+    observation_exists = (
+        db.query(SatelliteObservation)
+        .filter(SatelliteObservation.water_body_id == water_body_id)
+        .first()
+    )
+
+    if observation_exists is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Water body has no satellite observations",
+        )
+
+    return (
+        db.query(AnalysisResult)
+        .join(
+            SatelliteObservation,
+            AnalysisResult.observation_id == SatelliteObservation.id,
+        )
+        .filter(
+            SatelliteObservation.water_body_id == water_body_id
+        )
         .order_by(AnalysisResult.created_at.desc())
         .all()
     )
