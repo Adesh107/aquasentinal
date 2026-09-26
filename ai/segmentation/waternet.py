@@ -100,6 +100,7 @@ class WaterNetSegmenter:
         min_largest_component_ratio: float = 0.40,
         max_cloud_overlap_pct: float = 20.0,
         context_buffer_meters: float = 150.0,
+        expected_coverage_warning_pct: float = 5.0,
         mndwi_threshold: float = 0.05,
         ndwi_threshold: float = 0.02,
         min_component_area_pixels: int = 15,  # Filters 1500m2 specks
@@ -110,6 +111,7 @@ class WaterNetSegmenter:
         self.min_largest_component_ratio = min_largest_component_ratio
         self.max_cloud_overlap_pct = max_cloud_overlap_pct
         self.context_buffer_meters = context_buffer_meters
+        self.expected_coverage_warning_pct = expected_coverage_warning_pct
         self.mndwi_threshold = mndwi_threshold
         self.ndwi_threshold = ndwi_threshold
         self.min_component_area_pixels = min_component_area_pixels
@@ -512,6 +514,18 @@ class WaterNetSegmenter:
                 expected_coverage_pct = (
                     overlap_water_pixels / expected_water_pixels
                 ) * 100.0
+
+            if (
+                expected_coverage_pct < self.expected_coverage_warning_pct
+                and water_pixels > 0
+            ):
+                warnings.append(
+                    f"Detected water covers only {expected_coverage_pct:.2f}% of the "
+                    f"stored footprint (warning below {self.expected_coverage_warning_pct:.1f}%). "
+                    "This may indicate seasonal water-area change or an imprecise "
+                    "reference polygon; review the footprint before using absolute "
+                    "coverage as a water-level measurement."
+                )
 
             if water_pixels > 500 and detected_inside_expected_pct < 50.0:
                 spatial_prior_warning = (
