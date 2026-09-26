@@ -1,10 +1,14 @@
 from fastapi import FastAPI
 from sqlalchemy import text
+
 from app.routes.water_bodies import router as water_bodies_router
 from app.database import engine
 from app.routes.alerts import router as alerts_router
 from app.routes.satellite_observations import (
     router as satellite_observations_router,
+)
+from app.routes.analysis_results import (
+    router as analysis_results_router,
 )
 
 app = FastAPI(
@@ -16,6 +20,8 @@ app = FastAPI(
 app.include_router(water_bodies_router)
 app.include_router(alerts_router)
 app.include_router(satellite_observations_router)
+app.include_router(analysis_results_router)
+
 
 @app.get("/")
 def root():

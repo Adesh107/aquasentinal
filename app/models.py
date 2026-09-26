@@ -132,6 +132,42 @@ class SatelliteObservation(Base):
         default=datetime.utcnow,
     )
 
+class AnalysisResult(Base):
+    __tablename__ = "analysis_results"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    observation_id: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        index=True,
+    )
+
+    model_name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    model_version: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    analysis_data: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )   
+
 
 class Alert(Base):
     __tablename__ = "alerts"
