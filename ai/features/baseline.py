@@ -168,7 +168,24 @@ class HistoricalBaseline:
             self.load_history(water_body_id)
 
         history = self._histories.get(water_body_id, [])
-        num_obs = len(history)
+
+        # Only observations whose water mask passed the segmentation quality
+        # guard are eligible to define a statistical baseline. Poor masks can
+        # still be retained in history for audit/display, but must not become
+        # the reference distribution used for anomaly detection.
+        eligible_history = [
+            record
+            for record in history
+            if record.mask_quality_status == "ok"
+        ]
+        excluded_count = len(history) - len(eligible_history)
+        num_obs = len(eligible_history)
+
+        if excluded_count:
+            logger.info(
+                f"Excluding {excluded_count} low-quality observations for "
+                f"'{water_body_id}' from baseline computation."
+            )
 
         if num_obs == 0:
             logger.info(f"No observations for '{water_body_id}'. Baseline is insufficient.")
@@ -179,7 +196,7 @@ class HistoricalBaseline:
                 date_range={"earliest": "N/A", "latest": "N/A"},
             )
 
-        dates = [r.observation_date for r in history]
+        dates = [r.observation_date for r in eligible_history]
         date_range = {"earliest": min(dates), "latest": max(dates)}
 
         if num_obs < MIN_OBSERVATIONS:
@@ -196,10 +213,10 @@ class HistoricalBaseline:
             )
 
         # Compute statistics across all historical observations
-        areas = np.array([r.water_area_km2 for r in history])
-        turbs = np.array([r.turbidity_indicator for r in history])
-        chlors = np.array([r.chlorophyll_indicator for r in history])
-        algals = np.array([r.algal_indicator for r in history])
+        areas = np.array([r.water_area_km2 for r in eligible_history])
+        turbs = np.array([r.turbidity_indicator for r in eligible_history])
+        chlors = np.array([r.chlorophyll_indicator for r in eligible_history])
+        algals = np.array([r.algal_indicator for r in eligible_history])
 
         def _compute_stats(values: np.ndarray) -> Dict[str, float]:
             return {

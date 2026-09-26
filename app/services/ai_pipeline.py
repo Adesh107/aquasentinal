@@ -143,11 +143,14 @@ def run_satellite_analysis(
     )
     baseline_manager.add_observation(record)
 
-    pipeline_status = "ok"
+    # Quality problems take precedence over baseline availability so the API
+    # does not hide a degraded segmentation behind "insufficient_baseline".
     if not segmentation.quality_report.is_valid:
         pipeline_status = "degraded"
-    if baseline.status != "valid":
+    elif baseline.status != "valid":
         pipeline_status = "insufficient_baseline"
+    else:
+        pipeline_status = "ok"
 
     boundary = segmentation.boundary_geojson
     if not boundary.get("geometry"):
