@@ -197,6 +197,7 @@ def run_satellite_analysis(
             "window_widened": bool(satellite_observation.window_widened),
             "scl_available": bool(satellite_observation.quality_info.scl_available),
             "quality_guard_failures": list(segmentation.quality_report.failure_reasons),
+            "quality_warnings": list(segmentation.quality_report.quality_warnings),
             "expected_water_pixels": int(segmentation.quality_report.expected_water_pixels),
             "overlap_water_pixels": int(segmentation.quality_report.overlap_water_pixels),
             "detected_inside_expected_pct": float(
