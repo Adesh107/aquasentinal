@@ -95,7 +95,16 @@ def run_satellite_analysis(
     )
 
     segmenter = WaterNetSegmenter()
-    segmentation = segmenter.segment(ard)
+    # Validate segmentation against the stored water-body footprint. The
+    # footprint is used as a spatial prior, not as a pixel-level ground truth.
+    stored_geometry = mapping(to_shape(water_body.geometry))
+    segmentation = segmenter.segment(
+        ard,
+        expected_water_geometry={
+            "type": "Feature",
+            "geometry": stored_geometry,
+        },
+    )
 
     spectral = SpectralFeatureExtractor().extract(ard, segmentation)
     indicators = IndicatorEngine().compute(spectral.to_dict())
@@ -185,6 +194,18 @@ def run_satellite_analysis(
             "window_widened": bool(satellite_observation.window_widened),
             "scl_available": bool(satellite_observation.quality_info.scl_available),
             "quality_guard_failures": list(segmentation.quality_report.failure_reasons),
+            "expected_water_pixels": int(segmentation.quality_report.expected_water_pixels),
+            "overlap_water_pixels": int(segmentation.quality_report.overlap_water_pixels),
+            "detected_inside_expected_pct": float(
+                segmentation.quality_report.detected_inside_expected_pct
+            ),
+            "expected_coverage_pct": float(
+                segmentation.quality_report.expected_coverage_pct
+            ),
+            "out_of_footprint_pct": float(
+                segmentation.quality_report.out_of_footprint_pct
+            ),
+            "spatial_prior_warning": segmentation.quality_report.spatial_prior_warning,
         },
         "mode": indicators.mode,
         "model_version": indicators.model_version,

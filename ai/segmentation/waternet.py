@@ -54,6 +54,17 @@ class MaskQualityReport:
     fragmentation_index: float  # 1.0 - largest_component_ratio
     cloud_overlap_pixels: int
     cloud_overlap_pct: float
+
+    # Spatial-prior diagnostics. The expected footprint is a monitoring prior,
+    # not ground truth, so these values are reported separately from the
+    # spectral quality guard.
+    expected_water_pixels: int = 0
+    overlap_water_pixels: int = 0
+    detected_inside_expected_pct: float = 0.0
+    expected_coverage_pct: float = 0.0
+    out_of_footprint_pct: float = 0.0
+    spatial_prior_warning: Optional[str] = None
+
     failure_reasons: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -87,6 +98,7 @@ class WaterNetSegmenter:
         max_fragmentation_index: float = 0.50,
         min_largest_component_ratio: float = 0.40,
         max_cloud_overlap_pct: float = 20.0,
+        context_buffer_meters: float = 150.0,
         mndwi_threshold: float = 0.05,
         ndwi_threshold: float = 0.02,
         min_component_area_pixels: int = 15,  # Filters 1500m2 specks
@@ -96,11 +108,16 @@ class WaterNetSegmenter:
         self.max_fragmentation_index = max_fragmentation_index
         self.min_largest_component_ratio = min_largest_component_ratio
         self.max_cloud_overlap_pct = max_cloud_overlap_pct
+        self.context_buffer_meters = context_buffer_meters
         self.mndwi_threshold = mndwi_threshold
         self.ndwi_threshold = ndwi_threshold
         self.min_component_area_pixels = min_component_area_pixels
 
-    def segment(self, ard: AnalysisReadyData) -> WaterSegmentationResult:
+    def segment(
+        self,
+        ard: AnalysisReadyData,
+        expected_water_geometry: Optional[Dict[str, Any]] = None,
+    ) -> WaterSegmentationResult:
         """
         Segment water surface from analysis-ready bands and apply quality guard.
         
@@ -142,15 +159,39 @@ class WaterNetSegmenter:
             # Agreement or strong spectral index
             raw_water_mask = raw_water_mask | (scl_water & (mndwi > -0.05))
 
+        # Apply the selected water body's known footprint as a spatial prior.
+        # The prior is buffered so genuine shoreline movement can still be
+        # detected outside the stored/reference polygon.
+        expected_mask: Optional[np.ndarray] = None
+        context_mask: Optional[np.ndarray] = None
+        if expected_water_geometry is not None:
+            expected_mask, context_mask = self._rasterize_expected_geometry(
+                expected_water_geometry,
+                ard.profile,
+                (ard.height, ard.width),
+            )
+            raw_water_mask &= context_mask
+
         # 2. Morphological Spatial Cleanup
-        # Remove small disconnected noise specks and fill small holes
+        # Remove small disconnected noise specks, close tiny shoreline gaps,
+        # and keep components that are anchored to the known footprint or are
+        # sufficiently large and close to it.
         cleaned_mask = self._morphological_refine(raw_water_mask)
+        if expected_mask is not None:
+            cleaned_mask = self._anchor_components_to_footprint(
+                cleaned_mask,
+                expected_mask,
+            )
 
         # 3. Calculate Confidence Map
         confidence_map = self._compute_confidence_map(mndwi, ndwi, b08, cleaned_mask, ard.scl)
 
         # 4. GUARD: Check Mask Quality
-        quality_report = self._evaluate_mask_quality(cleaned_mask, ard)
+        quality_report = self._evaluate_mask_quality(
+            cleaned_mask,
+            ard,
+            expected_mask=expected_mask,
+        )
         if not quality_report.is_valid:
             logger.warning(
                 f"[GUARD TRIGGERED] Low confidence water mask for {ard.water_body_id}! "
@@ -199,9 +240,99 @@ class WaterNetSegmenter:
         keep_mask[0] = False  # Background
         cleaned = keep_mask[labeled_array]
 
-        # 2. Binary hole closing
+        # 2. Close narrow gaps and fill small shoreline cavities.
+        structure = np.ones((3, 3), dtype=bool)
+        cleaned = ndimage.binary_closing(cleaned, structure=structure, iterations=1)
         cleaned = ndimage.binary_fill_holes(cleaned)
         return cleaned
+
+    def _anchor_components_to_footprint(
+        self,
+        mask: np.ndarray,
+        expected_mask: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Keep water components that are spatially plausible for the selected
+        water body. Core components must overlap the expected footprint.
+        Expansion components may survive when they are large enough and close
+        to the footprint, preserving limited seasonal shoreline movement.
+        """
+        labeled, num_components = ndimage.label(mask)
+        if num_components == 0:
+            return np.zeros_like(mask, dtype=bool)
+
+        near_expected = ndimage.binary_dilation(
+            expected_mask,
+            iterations=max(1, int(round(self.context_buffer_meters / 10.0))),
+        )
+
+        component_sizes = ndimage.sum(
+            mask,
+            labeled,
+            range(1, num_components + 1),
+        )
+
+        keep_labels = np.zeros(num_components + 1, dtype=bool)
+        expansion_min_pixels = max(self.min_component_area_pixels * 4, 30)
+
+        for label_id, component_size in enumerate(component_sizes, start=1):
+            component = labeled == label_id
+            overlaps_core = bool(np.any(component & expected_mask))
+            is_near_core = bool(np.any(component & near_expected))
+
+            if overlaps_core or (
+                is_near_core and component_size >= expansion_min_pixels
+            ):
+                keep_labels[label_id] = True
+
+        return keep_labels[labeled]
+
+    def _rasterize_expected_geometry(
+        self,
+        expected_water_geometry: Dict[str, Any],
+        profile: Dict[str, Any],
+        shape: Tuple[int, int],
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Rasterize the stored water-body footprint and a meter-based buffered
+        context window onto the analysis grid.
+        """
+        geometry = expected_water_geometry.get("geometry", expected_water_geometry)
+        if not geometry or not geometry.get("type"):
+            raise ValueError("Expected water-body geometry is missing or invalid.")
+
+        native_geometry = transform_geom(
+            src_crs="EPSG:4326",
+            dst_crs=profile["crs"],
+            geom=geometry,
+        )
+        native_shape = shapely.geometry.shape(native_geometry)
+
+        if native_shape.is_empty:
+            raise ValueError("Expected water-body geometry is empty.")
+        if not native_shape.is_valid:
+            native_shape = native_shape.buffer(0)
+        if native_shape.is_empty:
+            raise ValueError("Expected water-body geometry could not be repaired.")
+
+        buffered_shape = native_shape.buffer(self.context_buffer_meters)
+
+        expected_mask = features.geometry_mask(
+            [mapping(native_shape)],
+            out_shape=shape,
+            transform=profile["transform"],
+            invert=True,
+            all_touched=True,
+        )
+        context_mask = features.geometry_mask(
+            [mapping(buffered_shape)],
+            out_shape=shape,
+            transform=profile["transform"],
+            invert=True,
+            all_touched=True,
+        )
+
+        return expected_mask, context_mask
 
     def _compute_confidence_map(
         self,
@@ -231,6 +362,7 @@ class WaterNetSegmenter:
         self,
         mask: np.ndarray,
         ard: AnalysisReadyData,
+        expected_mask: Optional[np.ndarray] = None,
     ) -> MaskQualityReport:
         """
         Executes strict quality checks on the segmentation mask.
@@ -269,6 +401,38 @@ class WaterNetSegmenter:
             cloud_overlap_pixels = int(np.sum(cloud_over_water))
             ref_denom = max(water_pixels, 1)
             cloud_overlap_pct = (cloud_overlap_pixels / ref_denom) * 100.0
+
+        expected_water_pixels = 0
+        overlap_water_pixels = 0
+        detected_inside_expected_pct = 0.0
+        expected_coverage_pct = 0.0
+        out_of_footprint_pct = 0.0
+        spatial_prior_warning: Optional[str] = None
+
+        if expected_mask is not None:
+            expected_water_pixels = int(np.sum(expected_mask))
+            overlap_water_pixels = int(np.sum(mask & expected_mask))
+
+            if water_pixels > 0:
+                detected_inside_expected_pct = (
+                    overlap_water_pixels / water_pixels
+                ) * 100.0
+                out_of_footprint_pct = max(
+                    0.0,
+                    100.0 - detected_inside_expected_pct,
+                )
+
+            if expected_water_pixels > 0:
+                expected_coverage_pct = (
+                    overlap_water_pixels / expected_water_pixels
+                ) * 100.0
+
+            if water_pixels > 500 and detected_inside_expected_pct < 50.0:
+                spatial_prior_warning = (
+                    "Less than half of detected water pixels overlap the "
+                    "stored water-body footprint; review the mask before using "
+                    "the observation for baseline/anomaly decisions."
+                )
 
         # Run Guard Constraints
         failures: List[str] = []
@@ -315,6 +479,12 @@ class WaterNetSegmenter:
             fragmentation_index=round(fragmentation_index, 4),
             cloud_overlap_pixels=cloud_overlap_pixels,
             cloud_overlap_pct=round(cloud_overlap_pct, 4),
+            expected_water_pixels=expected_water_pixels,
+            overlap_water_pixels=overlap_water_pixels,
+            detected_inside_expected_pct=round(detected_inside_expected_pct, 4),
+            expected_coverage_pct=round(expected_coverage_pct, 4),
+            out_of_footprint_pct=round(out_of_footprint_pct, 4),
+            spatial_prior_warning=spatial_prior_warning,
             failure_reasons=failures,
         )
 
