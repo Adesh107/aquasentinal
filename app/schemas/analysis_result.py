@@ -6,18 +6,25 @@ from pydantic import BaseModel, ConfigDict, Field
 class AnalysisData(BaseModel):
     turbidity: float | None = None
     chlorophyll: float | None = None
-    anomaly_score: float | None = Field(
-        default=None,
-        ge=0.0,
-        le=1.0,
-    )
+    algal: float | None = None
+    water_area_km2: float | None = None
+
+    anomaly_score: float | None = Field(default=None, ge=0.0, le=1.0)
     anomaly_detected: bool = False
-    confidence: float | None = Field(
-        default=None,
-        ge=0.0,
-        le=1.0,
-    )
-    evidence: list[str] = []
+    anomaly_level: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    affected_area_km2: float | None = Field(default=None, ge=0.0)
+    baseline_status: str | None = None
+    baseline_observation_count: int | None = Field(default=None, ge=0)
+
+    mode: str | None = None
+    processing_version: str | None = None
+    calibration_status: dict[str, str] = Field(default_factory=dict)
+    observation_quality: dict | None = None
+    individual_scores: dict[str, float] = Field(default_factory=dict)
+    evidence: list[str] = Field(default_factory=list)
+    geojson: dict | None = None
 
 
 class AnalysisResultCreate(BaseModel):

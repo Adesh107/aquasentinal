@@ -4,3 +4,7 @@ __pycache__/
 .env
 frontend/node_modules/
 frontend/dist/
+
+# AI pipeline runtime state / downloads
+ai/outputs/json/baselines/
+ai/outputs/raster/
