@@ -75,6 +75,27 @@ def get_latest_analysis(
     )
 
 
+def build_analysis_snapshot(
+    observation: SatelliteObservation,
+    analysis: AnalysisResult,
+):
+    data = analysis.analysis_data
+
+    return {
+        "observation_id": observation.id,
+        "observation_date": observation.observation_date,
+        "analysis_id": analysis.id,
+        "turbidity": data.get("turbidity"),
+        "chlorophyll": data.get("chlorophyll"),
+        "anomaly_score": data.get("anomaly_score"),
+        "anomaly_detected": data.get(
+            "anomaly_detected",
+            False,
+        ),
+        "confidence": data.get("confidence"),
+    }
+
+
 @router.get("/{water_body_id}/timeline")
 def get_water_body_timeline(
     water_body_id: int,
@@ -256,4 +277,102 @@ def get_water_body_trend(
             ),
         },
         "series": series,
+    }
+
+
+@router.get("/{water_body_id}/comparison")
+def get_water_body_comparison(
+    water_body_id: int,
+    from_date: datetime | None = Query(default=None),
+    to_date: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    water_body = (
+        db.query(WaterBody)
+        .filter(WaterBody.id == water_body_id)
+        .first()
+    )
+
+    if water_body is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Water body not found",
+        )
+
+    observations = get_observations_for_water_body(
+        water_body_id,
+        from_date,
+        to_date,
+        db,
+    )
+
+    analyzed = []
+
+    for observation in observations:
+        latest_analysis = get_latest_analysis(
+            observation.id,
+            db,
+        )
+
+        if latest_analysis is not None:
+            analyzed.append(
+                build_analysis_snapshot(
+                    observation,
+                    latest_analysis,
+                )
+            )
+
+    if len(analyzed) < 2:
+        return {
+            "water_body_id": water_body_id,
+            "from_date": from_date,
+            "to_date": to_date,
+            "comparison_available": False,
+            "reason": "At least two analyzed observations are required for comparison",
+            "earlier": analyzed[0] if analyzed else None,
+            "latest": None,
+            "change": {
+                "turbidity": None,
+                "chlorophyll": None,
+                "anomaly_score": None,
+                "confidence": None,
+            },
+        }
+
+    earlier = analyzed[0]
+    latest = analyzed[-1]
+
+    def calculate_change(
+        earlier_value: float | None,
+        latest_value: float | None,
+    ):
+        if earlier_value is None or latest_value is None:
+            return None
+        return latest_value - earlier_value
+
+    return {
+        "water_body_id": water_body_id,
+        "from_date": from_date,
+        "to_date": to_date,
+        "comparison_available": True,
+        "earlier": earlier,
+        "latest": latest,
+        "change": {
+            "turbidity": calculate_change(
+                earlier["turbidity"],
+                latest["turbidity"],
+            ),
+            "chlorophyll": calculate_change(
+                earlier["chlorophyll"],
+                latest["chlorophyll"],
+            ),
+            "anomaly_score": calculate_change(
+                earlier["anomaly_score"],
+                latest["anomaly_score"],
+            ),
+            "confidence": calculate_change(
+                earlier["confidence"],
+                latest["confidence"],
+            ),
+        },
     }
