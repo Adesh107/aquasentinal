@@ -120,6 +120,48 @@ def get_analysis_results_for_water_body(
 
 
 # ---------------------------------------------------------
+# GET LATEST ANALYSIS FOR AN OBSERVATION
+# ---------------------------------------------------------
+
+@router.get(
+    "/satellite-observations/{observation_id}/latest-analysis",
+    response_model=AnalysisResultResponse,
+)
+def get_latest_analysis_for_observation(
+    observation_id: int,
+    db: Session = Depends(get_db),
+):
+    observation = (
+        db.query(SatelliteObservation)
+        .filter(SatelliteObservation.id == observation_id)
+        .first()
+    )
+
+    if observation is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Satellite observation not found",
+        )
+
+    latest_analysis = (
+        db.query(AnalysisResult)
+        .filter(
+            AnalysisResult.observation_id == observation_id
+        )
+        .order_by(AnalysisResult.created_at.desc())
+        .first()
+    )
+
+    if latest_analysis is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No analysis result found for this observation",
+        )
+
+    return latest_analysis
+
+
+# ---------------------------------------------------------
 # GET SINGLE ANALYSIS RESULT
 # ---------------------------------------------------------
 
