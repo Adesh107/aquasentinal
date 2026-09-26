@@ -38,6 +38,24 @@ class HistoricalBaselineQualityTests(unittest.TestCase):
             self.assertEqual(baseline.status, "insufficient")
             self.assertEqual(baseline.num_observations, 2)
 
+    def test_warning_observations_do_not_enter_baseline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = HistoricalBaseline(Path(tmp))
+            manager.add_observation(
+                self._record("2024-01-01T00:00:00Z", "ok", 0.10)
+            )
+            manager.add_observation(
+                self._record("2024-02-01T00:00:00Z", "ok_with_warning", 0.20)
+            )
+            manager.add_observation(
+                self._record("2024-03-01T00:00:00Z", "ok", 0.30)
+            )
+
+            baseline = manager.compute_baseline("WB_TEST")
+
+            self.assertEqual(baseline.status, "insufficient")
+            self.assertEqual(baseline.num_observations, 2)
+
     def test_three_quality_passed_observations_make_valid_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = HistoricalBaseline(Path(tmp))

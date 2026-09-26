@@ -8,9 +8,11 @@ from app.models import Alert, AnalysisResult, SatelliteObservation, WaterBody
 from app.schemas.ai_analysis import (
     AIAnalyzeRequest,
     AIAnalyzeResponse,
+    AIBaselineResponse,
     AIHealthResponse,
 )
-from app.services.ai_pipeline import run_satellite_analysis
+from app.services.ai_pipeline import run_satellite_analysis, _backend_water_body_to_ai_id
+from ai.features.baseline import HistoricalBaseline, MIN_OBSERVATIONS
 
 
 router = APIRouter(prefix="/ai", tags=["Satellite AI"])
@@ -173,6 +175,51 @@ def analyze_water_body(
     result["analysis_id"] = analysis.id
     result["alert_id"] = alert.id if alert is not None else None
     return result
+
+
+
+@router.get(
+    "/baseline/{water_body_id}",
+    response_model=AIBaselineResponse,
+)
+def get_baseline_status(
+    water_body_id: int,
+    db: Session = Depends(get_db),
+):
+    water_body = (
+        db.query(WaterBody)
+        .filter(
+            WaterBody.id == water_body_id,
+            WaterBody.active == True,
+        )
+        .first()
+    )
+    if water_body is None:
+        raise HTTPException(status_code=404, detail="Active water body not found")
+
+    manager = HistoricalBaseline()
+    ai_water_body_id = _backend_water_body_to_ai_id(water_body_id)
+    history = manager.load_history(ai_water_body_id)
+    baseline = manager.compute_baseline(ai_water_body_id)
+
+    eligible_count = baseline.num_observations
+    total_count = len(history)
+
+    return {
+        "water_body_id": water_body_id,
+        "ai_water_body_id": ai_water_body_id,
+        "status": baseline.status,
+        "minimum_required": MIN_OBSERVATIONS,
+        "eligible_observation_count": eligible_count,
+        "total_history_count": total_count,
+        "excluded_observation_count": max(0, total_count - eligible_count),
+        "remaining_observations": max(0, MIN_OBSERVATIONS - eligible_count),
+        "date_range": baseline.date_range,
+        "water_area_stats": baseline.water_area_stats,
+        "turbidity_stats": baseline.turbidity_stats,
+        "chlorophyll_stats": baseline.chlorophyll_stats,
+        "algal_stats": baseline.algal_stats,
+    }
 
 
 @router.get("/health", response_model=AIHealthResponse)

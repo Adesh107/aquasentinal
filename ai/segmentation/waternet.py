@@ -496,6 +496,8 @@ class WaterNetSegmenter:
         expected_coverage_pct = 0.0
         out_of_footprint_pct = 0.0
         spatial_prior_warning: Optional[str] = None
+        failures: List[str] = []
+        warnings: List[str] = []
 
         if expected_mask is not None:
             expected_water_pixels = int(np.sum(expected_mask))
@@ -533,10 +535,9 @@ class WaterNetSegmenter:
                     "stored water-body footprint; review the mask before using "
                     "the observation for baseline/anomaly decisions."
                 )
+                warnings.append(spatial_prior_warning)
 
         # Run Guard Constraints
-        failures: List[str] = []
-        warnings: List[str] = []
         status = "ok"
         is_valid = True
 
@@ -565,7 +566,13 @@ class WaterNetSegmenter:
         if failures:
             is_valid = False
             if status == "ok":
-                status = "low_confidence_mask" if "fragmentation" in str(failures) else "degraded"
+                status = (
+                    "low_confidence_mask"
+                    if "fragmentation" in str(failures)
+                    else "degraded"
+                )
+        elif warnings:
+            status = "ok_with_warning"
 
         return MaskQualityReport(
             is_valid=is_valid,
