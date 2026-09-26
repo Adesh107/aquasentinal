@@ -73,6 +73,22 @@ class AIAnalyzeResponse(BaseModel):
     anomaly_regions: dict | None = None
 
 
+
+class AIBaselineResponse(BaseModel):
+    water_body_id: int
+    ai_water_body_id: str
+    status: str
+    minimum_required: int
+    eligible_observation_count: int
+    total_history_count: int
+    excluded_observation_count: int
+    remaining_observations: int
+    date_range: dict[str, str]
+    water_area_stats: dict[str, float] = Field(default_factory=dict)
+    turbidity_stats: dict[str, float] = Field(default_factory=dict)
+    chlorophyll_stats: dict[str, float] = Field(default_factory=dict)
+    algal_stats: dict[str, float] = Field(default_factory=dict)
+
 class AIHealthResponse(BaseModel):
     status: str
     schema_version: str
