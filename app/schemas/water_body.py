@@ -15,6 +15,15 @@ class WaterBodyCreate(BaseModel):
     geometry: PolygonGeometry
 
 
+class WaterBodyUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    type: str | None = Field(default=None, max_length=100)
+    district: str | None = Field(default=None, max_length=100)
+    state: str | None = Field(default=None, min_length=1, max_length=100)
+    geometry: PolygonGeometry | None = None
+    active: bool | None = None
+
+
 class WaterBodyResponse(BaseModel):
     id: int
     name: str
