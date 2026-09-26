@@ -64,6 +64,7 @@ class MaskQualityReport:
     expected_coverage_pct: float = 0.0
     out_of_footprint_pct: float = 0.0
     spatial_prior_warning: Optional[str] = None
+    quality_warnings: List[str] = field(default_factory=list)
 
     failure_reasons: List[str] = field(default_factory=list)
 
@@ -427,6 +428,13 @@ class WaterNetSegmenter:
                     overlap_water_pixels / expected_water_pixels
                 ) * 100.0
 
+            if expected_mask is not None and expected_coverage_pct < 5.0:
+                warnings.append(
+                    f"Detected water covers only {expected_coverage_pct:.2f}% of the "
+                    "stored footprint; treat the stored polygon as a loose spatial "
+                    "prior rather than measured water area."
+                )
+
             if water_pixels > 500 and detected_inside_expected_pct < 50.0:
                 spatial_prior_warning = (
                     "Less than half of detected water pixels overlap the "
@@ -436,6 +444,7 @@ class WaterNetSegmenter:
 
         # Run Guard Constraints
         failures: List[str] = []
+        warnings: List[str] = []
         status = "ok"
         is_valid = True
 
@@ -449,10 +458,26 @@ class WaterNetSegmenter:
             )
 
         if fragmentation_index > self.max_fragmentation_index and water_pixels > 500:
-            failures.append(
-                f"High fragmentation index: {fragmentation_index:.3f} (max allowed {self.max_fragmentation_index:.3f}; "
-                f"largest component occupies only {largest_ratio*100:.1f}% of detected water)"
-            )
+            # A stored footprint is a monitoring prior, not pixel-level truth.
+            # When almost all detected water is spatially consistent with that
+            # prior and cloud overlap is low, fragmentation is retained as a
+            # review warning instead of invalidating an otherwise usable mask.
+            if (
+                expected_mask is not None
+                and detected_inside_expected_pct >= 90.0
+                and cloud_overlap_pct <= self.max_cloud_overlap_pct
+            ):
+                warnings.append(
+                    f"Fragmented water mask: {fragmentation_index:.3f} "
+                    f"(largest component {largest_ratio*100:.1f}% of detected water). "
+                    "Spatial overlap with the stored footprint is strong; review "
+                    "the mask visually before treating small components as true water."
+                )
+            else:
+                failures.append(
+                    f"High fragmentation index: {fragmentation_index:.3f} (max allowed {self.max_fragmentation_index:.3f}; "
+                    f"largest component occupies only {largest_ratio*100:.1f}% of detected water)"
+                )
 
         if cloud_overlap_pct > self.max_cloud_overlap_pct:
             failures.append(
@@ -464,7 +489,13 @@ class WaterNetSegmenter:
         if failures:
             is_valid = False
             if status == "ok":
-                status = "low_confidence_mask" if "fragmentation" in str(failures) else "degraded"
+                status = (
+                    "low_confidence_mask"
+                    if "fragmentation" in str(failures)
+                    else "degraded"
+                )
+        elif warnings:
+            status = "ok_with_warning"
 
         return MaskQualityReport(
             is_valid=is_valid,
@@ -485,6 +516,7 @@ class WaterNetSegmenter:
             expected_coverage_pct=round(expected_coverage_pct, 4),
             out_of_footprint_pct=round(out_of_footprint_pct, 4),
             spatial_prior_warning=spatial_prior_warning,
+            quality_warnings=warnings,
             failure_reasons=failures,
         )
 
