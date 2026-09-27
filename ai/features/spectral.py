@@ -83,9 +83,14 @@ class SpectralFeatures:
     turbidity_indicator: float
     chlorophyll_indicator: float
     algal_indicator: float
+    # Internal per-pixel composites used by spatial anomaly localization.
+    # Kept out of to_dict() so the public indicator contract remains unchanged.
+    spatial_maps: Dict[str, np.ndarray] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("spatial_maps", None)
+        return data
 
 
 class SpectralFeatureExtractor:
@@ -288,4 +293,9 @@ class SpectralFeatureExtractor:
             turbidity_indicator=turbidity_indicator,
             chlorophyll_indicator=chlorophyll_indicator,
             algal_indicator=algal_indicator,
+            spatial_maps={
+                "turbidity": turb_composite,
+                "chlorophyll": chl_composite,
+                "algal": alg_composite,
+            },
         )
