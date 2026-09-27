@@ -158,7 +158,7 @@ class SpatialAnomalyMapper:
             else None
         )
 
-        features = []
+        geojson_features = []
         shapes_gen = features.shapes(
             anomaly_mask.astype(np.uint8),
             mask=anomaly_mask,
@@ -198,7 +198,7 @@ class SpatialAnomalyMapper:
                 geom=geom,
             )
 
-            features.append(
+            geojson_features.append(
                 {
                     "type": "Feature",
                     "geometry": reprojected,
@@ -217,12 +217,12 @@ class SpatialAnomalyMapper:
                 }
             )
 
-        if not features:
+        if not geojson_features:
             return self._empty()
 
         regions = {
             "type": "FeatureCollection",
-            "features": features,
+            "features": geojson_features,
         }
         affected_area = round(anomalous_pixels * pixel_area_km2, 6)
 
