@@ -131,9 +131,26 @@ class PlanetaryComputerSentinelClient:
 
             items = list(search.items())
             if items:
-                best_item = items[0]
+                # Select the acquisition closest to the requested observation date.
+                # Cloud cover remains the tie-breaker so the query does not
+                # silently substitute a much older/later scene just because it
+                # has lower cloud cover.
+                def _selection_key(item):
+                    item_dt = item.datetime
+                    if item_dt is None:
+                        return (float("inf"), float(item.properties.get("eo:cloud_cover", 100.0)))
+                    if item_dt.tzinfo is None:
+                        item_dt = item_dt.replace(tzinfo=timezone.utc)
+                    item_dt = item_dt.astimezone(timezone.utc)
+                    center_utc = center_dt.astimezone(timezone.utc)
+                    return (
+                        abs((item_dt - center_utc).total_seconds()),
+                        float(item.properties.get("eo:cloud_cover", 100.0)),
+                    )
+
+                best_item = min(items, key=_selection_key)
                 matched_msg = (
-                    f"Found {len(items)} matching observations. Selected lowest cloud scene: "
+                    f"Found {len(items)} matching observations. Selected closest scene: "
                     f"ID={best_item.id}, CloudCover={best_item.properties.get('eo:cloud_cover', 'N/A')}%, "
                     f"ObsDate={best_item.datetime.isoformat()}"
                 )
