@@ -172,7 +172,12 @@ def _fetch_elements() -> tuple[list[dict[str, Any]], str]:
                     endpoint,
                     "Maharashtra area" if use_area else "Maharashtra bbox",
                 )
-                return elements, endpoint
+                if elements:
+                    return elements, endpoint
+                last_error = RuntimeError(
+                    f"Overpass returned no named water elements using "
+                    f"{'Maharashtra area' if use_area else 'Maharashtra bbox'}."
+                )
             except (requests.RequestException, ValueError) as exc:
                 last_error = exc
                 logger.warning("Overpass request failed at %s: %s", endpoint, exc)
