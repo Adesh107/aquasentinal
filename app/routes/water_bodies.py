@@ -8,6 +8,7 @@ from shapely.geometry import mapping
 from app.database import get_db
 from app.models import WaterBody
 from app.schemas.water_body import WaterBodyCreate, WaterBodyUpdate
+from app.services.water_body_discovery import discover_and_import_water_bodies
 
 
 router = APIRouter(
@@ -91,6 +92,22 @@ def calculate_area_sq_km(db: Session, water_body_id: int) -> float | None:
         {"id": water_body_id},
     )
     return area_result.scalar()
+
+
+# ---------------------------------------------------------
+# DISCOVER / UPSERT REAL WATER BODIES
+# ---------------------------------------------------------
+
+@router.post("/discover")
+def discover_water_bodies(
+    limit: int = Query(default=60, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """Fetch named Maharashtra lakes/reservoirs from OpenStreetMap and upsert them."""
+    try:
+        return discover_and_import_water_bodies(db, limit=limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------
