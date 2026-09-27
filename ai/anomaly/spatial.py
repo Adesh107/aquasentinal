@@ -20,6 +20,7 @@ from typing import Any, Dict
 import numpy as np
 from rasterio import features
 from rasterio.warp import transform_geom
+from scipy import ndimage
 from shapely.geometry import shape
 
 
@@ -126,9 +127,9 @@ class SpatialAnomalyMapper:
 
         # Remove tiny isolated components. This does not create new regions;
         # it only suppresses pixel noise in the already-derived anomaly mask.
-        labeled, num_components = __import__("scipy").ndimage.label(anomaly_mask)
+        labeled, num_components = ndimage.label(anomaly_mask)
         if num_components:
-            sizes = __import__("scipy").ndimage.sum(
+            sizes = ndimage.sum(
                 anomaly_mask,
                 labeled,
                 range(1, num_components + 1),
@@ -157,7 +158,7 @@ class SpatialAnomalyMapper:
         )
 
         features = []
-        shapes_gen = features_module = features.shapes(
+        shapes_gen = features.shapes(
             anomaly_mask.astype(np.uint8),
             mask=anomaly_mask,
             transform=transform,
