@@ -173,10 +173,14 @@ class HistoricalBaseline:
         # guard are eligible to define a statistical baseline. Poor masks can
         # still be retained in history for audit/display, but must not become
         # the reference distribution used for anomaly detection.
+        # "ok_with_warning" is eligible when the hard mask-quality guard
+        # passed. Its warning is retained for audit/UI, but warnings about the
+        # stored reference footprint do not invalidate the spectral observation.
+        eligible_statuses = {"ok", "ok_with_warning"}
         eligible_history = [
             record
             for record in history
-            if record.mask_quality_status == "ok"
+            if record.mask_quality_status in eligible_statuses
         ]
         excluded_count = len(history) - len(eligible_history)
         num_obs = len(eligible_history)
