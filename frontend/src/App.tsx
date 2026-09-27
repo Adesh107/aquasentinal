@@ -71,6 +71,7 @@ import type {
   AnomalyHistoryResponse,
   ComparisonResponse,
   GeoJsonFeature,
+  GeoJsonFeatureCollection,
   SatelliteObservation,
   TrendResponse,
   WaterBody,
@@ -374,7 +375,7 @@ function WaterBodyMap({
   alerts?: Alert[];
   selectedId?: number | null;
   onSelect?: (id: number) => void;
-  alertFeature?: GeoJsonFeature | null;
+  alertFeature?: GeoJsonFeature | GeoJsonFeatureCollection | null;
   height?: number;
 }) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
@@ -413,10 +414,12 @@ function WaterBodyMap({
   const alertCollection = useMemo(
     () =>
       alertFeature
-        ? {
-            type: "FeatureCollection" as const,
-            features: [alertFeature],
-          }
+        ? alertFeature.type === "FeatureCollection"
+          ? alertFeature
+          : {
+              type: "FeatureCollection" as const,
+              features: [alertFeature],
+            }
         : { type: "FeatureCollection" as const, features: [] },
     [alertFeature],
   );
@@ -767,7 +770,13 @@ function WaterBodyDetailPage() {
         waterBody.data && <div className="detail-grid-top">
           <div className="panel footprint-panel">
             <div className="panel-header"><div><div className="panel-kicker">DIGITAL FOOTPRINT</div><div className="panel-title">Water-body layout</div></div>{waterBody.data.area_sq_km != null && <span className="area-pill">{waterBody.data.area_sq_km.toFixed(2)} km²</span>}</div>
-            <WaterBodyMap waterBodies={[waterBody.data]} alerts={alerts.data ?? []} selectedId={id} height={360} />
+            <WaterBodyMap
+            waterBodies={[waterBody.data]}
+            alerts={alerts.data ?? []}
+            selectedId={id}
+            alertFeature={latestAnalysis?.analysis_data.geojson?.anomaly_regions ?? null}
+            height={360}
+          />
           </div>
           <div className="panel">
             <div className="panel-header"><div><div className="panel-kicker">SATELLITE OBSERVATION</div><div className="panel-title">Latest scene</div></div><Satellite size={17} className="muted" /></div>
