@@ -25,6 +25,7 @@ class AnalysisData(BaseModel):
     individual_scores: dict[str, float] = Field(default_factory=dict)
     evidence: list[str] = Field(default_factory=list)
     geojson: dict | None = None
+    spatial_anomaly: dict = Field(default_factory=dict)
 
 
 class AnalysisResultCreate(BaseModel):
