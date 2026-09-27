@@ -68,6 +68,42 @@ export async function getWaterBodies(filters?: {
   );
 }
 
+export async function discoverWaterBodies(limit = 60) {
+  return request<{
+    source: string;
+    endpoint: string;
+    requested_limit: number;
+    discovered: number;
+    imported: number;
+    updated: number;
+    water_bodies: Array<{
+      id: number;
+      name: string;
+      type: string | null;
+      district: string | null;
+      area_sq_km: number | null;
+      source: string;
+      osm_id: number | null;
+    }>;
+  }>(`/water-bodies/discover${query({ limit })}`, {
+    method: "POST",
+  });
+}
+
+export async function getWaterBodiesEnsuringDiscovery() {
+  const current = await getWaterBodies();
+  const hasRealImportedWaterBodies = current.some(
+    (waterBody) => waterBody.source.toLowerCase() === "openstreetmap",
+  );
+
+  // Keep existing manual records, but make sure a fresh database/demo instance
+  // also gets a real Maharashtra water-body inventory.
+  if (hasRealImportedWaterBodies) return current;
+
+  await discoverWaterBodies(60);
+  return getWaterBodies();
+}
+
 export async function getNearbyWaterBodies(
   latitude: number,
   longitude: number,
@@ -193,6 +229,10 @@ export async function getAlerts(filters?: {
 
 export async function getAlert(id: number) {
   return request<Alert>(`/alerts/${id}`);
+}
+
+export async function getActiveAlertGeometries() {
+  return request<GeoJsonFeatureCollection>("/alerts/geometries");
 }
 
 export async function getAlertGeometry(id: number) {

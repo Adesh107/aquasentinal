@@ -155,6 +155,89 @@ def get_alerts(
 
 
 # ---------------------------------------------------------
+# ACTIVE ALERT GEOMETRIES (MAP LAYER)
+# IMPORTANT: keep this BEFORE /{alert_id}/geometry
+# ---------------------------------------------------------
+
+@router.get("/geometries")
+def get_alert_geometries(
+    status: str = "active",
+    db: Session = Depends(get_db),
+):
+    """Return alert/anomaly polygons as one GeoJSON FeatureCollection for maps."""
+    query = db.query(Alert)
+    if status:
+        query = query.filter(Alert.status == status)
+
+    alerts = query.order_by(Alert.date.desc()).all()
+    features = []
+
+    for alert in alerts:
+        base_properties = {
+            "alert_id": alert.id,
+            "water_body_id": alert.water_body_id,
+            "analysis_id": alert.analysis_id,
+            "date": alert.date,
+            "indicator": alert.indicator,
+            "severity": alert.severity,
+            "confidence": alert.confidence,
+            "affected_area_km2": alert.affected_area_km2,
+            "status": alert.status,
+        }
+
+        if alert.geometry is not None:
+            geometry = mapping(to_shape(alert.geometry))
+            features.append({
+                "type": "Feature",
+                "id": alert.id,
+                "properties": base_properties,
+                "geometry": {
+                    "type": geometry["type"],
+                    "coordinates": geometry["coordinates"],
+                },
+            })
+            continue
+
+        if alert.analysis_id is None:
+            continue
+
+        analysis_result = (
+            db.query(AnalysisResult)
+            .filter(AnalysisResult.id == alert.analysis_id)
+            .first()
+        )
+        anomaly_regions = (
+            analysis_result.analysis_data.get("geojson", {}).get("anomaly_regions")
+            if analysis_result is not None
+            else None
+        )
+        if not anomaly_regions:
+            continue
+
+        for index, feature in enumerate(anomaly_regions.get("features", [])):
+            geometry = feature.get("geometry")
+            if not geometry:
+                continue
+            properties = {
+                **base_properties,
+                **(feature.get("properties") or {}),
+                "alert_id": alert.id,
+                "water_body_id": alert.water_body_id,
+            }
+            features.append({
+                "type": "Feature",
+                "id": f"{alert.id}-{index}",
+                "properties": properties,
+                "geometry": geometry,
+            })
+
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+    }
+
+
+# ---------------------------------------------------------
 # ALERT GEOMETRY
 # IMPORTANT: keep this BEFORE /{alert_id}
 # ---------------------------------------------------------

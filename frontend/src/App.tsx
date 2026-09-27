@@ -60,7 +60,9 @@ import {
   getSatelliteObservations,
   getTimeline,
   getTrend,
-  getWaterBodies,
+  getWaterBodiesEnsuringDiscovery,
+  discoverWaterBodies,
+  getActiveAlertGeometries,
   getWaterBody,
   getWaterBodyGeometry,
   getNearbyWaterBodies,
@@ -459,7 +461,7 @@ function WaterBodyMap({
         source: "water-bodies",
         paint: {
           "fill-color": ["case", ["get", "hasActiveAlert"], "#b84a3c", "#1e8074"],
-          "fill-opacity": 0.18,
+          "fill-opacity": ["case", ["==", ["get", "id"], selectedId ?? -1], 0.32, 0.18],
         },
       });
       map.addLayer({
@@ -468,7 +470,7 @@ function WaterBodyMap({
         source: "water-bodies",
         paint: {
           "line-color": ["case", ["get", "hasActiveAlert"], "#b84a3c", "#0f6b61"],
-          "line-width": 1.5,
+          "line-width": ["case", ["==", ["get", "id"], selectedId ?? -1], 3, 1.5],
         },
       });
       map.addLayer({
@@ -559,7 +561,7 @@ function WaterBodyMap({
           waterBody.geometry.coordinates[0]?.forEach(([lng, lat]) => bounds.extend([lng, lat]));
         });
         if (!bounds.isEmpty()) {
-          map.fitBounds(bounds, { padding: 50, maxZoom: 9, duration: 400 });
+          map.fitBounds(bounds, { padding: 50, maxZoom: features.length === 1 ? 14 : 9, duration: 400 });
         }
       }
 
@@ -587,16 +589,17 @@ function WaterBodyMap({
 
 function OverviewPage() {
   const navigate = useNavigate();
-  const waterBodies = useAsync(getWaterBodies, []);
+  const waterBodies = useAsync(getWaterBodiesEnsuringDiscovery, []);
   const alerts = useAsync(() => getAlerts(), []);
   const observations = useAsync(() => getSatelliteObservations(), []);
   const analyses = useAsync(() => getAnalysisResults(), []);
+  const alertGeometries = useAsync(() => getActiveAlertGeometries(), []);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const selected = waterBodies.data?.find((item) => item.id === selectedId) ?? waterBodies.data?.[0] ?? null;
   const activeAlerts = alerts.data?.filter((a) => a.status.toLowerCase() === "active") ?? [];
   const recentAlerts = [...(alerts.data ?? [])].sort((a, b) => +new Date(b.date) - +new Date(a.date)).slice(0, 5);
-  const anyError = waterBodies.error || alerts.error || observations.error || analyses.error;
+  const anyError = waterBodies.error || alerts.error || alertGeometries.error || observations.error || analyses.error;
 
   return (
     <div>
@@ -635,11 +638,12 @@ function OverviewPage() {
           <div className="legend">
             <span><i className="legend-dot monitored" /> Monitored</span>
             <span><i className="legend-dot alert" /> Active alert</span>
+            <span><i className="legend-dot alert" /> Contamination hotspot</span>
           </div>
         </div>
         {waterBodies.loading ? <div className="map-loading"><div className="skeleton skeleton-full" /></div> :
           waterBodies.error ? <ErrorState message={waterBodies.error} /> :
-          <WaterBodyMap waterBodies={waterBodies.data ?? []} alerts={alerts.data ?? []} selectedId={selected?.id} onSelect={setSelectedId} />}
+          <WaterBodyMap waterBodies={waterBodies.data ?? []} alerts={alerts.data ?? []} selectedId={selected?.id} onSelect={setSelectedId} alertFeature={alertGeometries.data ?? null} />}
         <div className="map-panel-footer">
           <div>
             <span className="footer-label">Selected</span>
@@ -709,8 +713,24 @@ function OverviewPage() {
 
 function WaterBodiesPage() {
   const navigate = useNavigate();
-  const state = useAsync(() => getWaterBodies(), []);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const state = useAsync(() => getWaterBodiesEnsuringDiscovery(), [refreshKey]);
   const [search, setSearch] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  async function syncLakes() {
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      await discoverWaterBodies(60);
+      setRefreshKey((value) => value + 1);
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : "Lake discovery failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
   const [district, setDistrict] = useState("");
   const [type, setType] = useState("");
   const [nearby, setNearby] = useState<(WaterBody & { distance_km: number })[] | null>(null);
@@ -747,7 +767,8 @@ function WaterBodiesPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="WATER BODY REGISTRY" title="Water bodies" text="Filter active water bodies, inspect footprints, and open detailed monitoring views." actions={<button className="button outline" onClick={findNearby}><MapPin size={15} /> Find nearby</button>} />
+      <PageHeader eyebrow="WATER BODY REGISTRY" title="Water bodies" text="Real named Maharashtra lake/reservoir footprints from OpenStreetMap, ready for Sentinel-2 monitoring." actions={<><button className="button outline" onClick={syncLakes} disabled={syncing}><RefreshCw size={15} className={syncing ? "spin" : undefined} /> {syncing ? "Syncing lakes…" : "Sync lake data"}</button><button className="button outline" onClick={findNearby}><MapPin size={15} /> Find nearby</button></>} />
+      {syncError && <div className="inline-warning"><CircleAlert size={15} /> {syncError}</div>}
       {nearbyError && <div className="inline-warning"><MapPin size={15} /> {nearbyError}</div>}
       {nearby && <div className="nearby-panel"><div><strong>Nearby water bodies</strong><span>Within 25 km of your browser location</span></div><button className="button ghost small" onClick={() => setNearby(null)}>Hide</button><div className="nearby-list">{nearby.map((item) => <button className="nearby-chip" key={item.id} onClick={() => navigate(`/water-bodies/${item.id}`)}><span>{item.name}</span><b>{item.distance_km.toFixed(1)} km</b></button>)}</div></div>}
       <div className="filter-bar">
@@ -933,7 +954,7 @@ function AlertsPage() {
     from_date: fromDate ? `${fromDate}T00:00:00` : undefined,
     to_date: toDate ? `${toDate}T23:59:59` : undefined,
   }), [waterBodyFilter, fromDate, toDate]);
-  const waterBodies = useAsync(() => getWaterBodies(), []);
+  const waterBodies = useAsync(getWaterBodiesEnsuringDiscovery, []);
   const selectedAlert = alerts.data?.find((alert) => alert.id === selectedAlertId) ?? null;
   const alertGeometry = useAsync(() => selectedAlert ? getAlertGeometry(selectedAlert.id) : Promise.resolve(null), [selectedAlert?.id]);
 
@@ -982,7 +1003,7 @@ function AlertsPage() {
 function HistoryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = Number(searchParams.get("waterBody")) || 0;
-  const waterBodies = useAsync(() => getWaterBodies(), []);
+  const waterBodies = useAsync(getWaterBodiesEnsuringDiscovery, []);
   const id = selectedId || waterBodies.data?.[0]?.id || 0;
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -1036,7 +1057,7 @@ function HistoryPage() {
 function ObservationsPage() {
   const [searchParams] = useSearchParams();
   const initialWaterBody = Number(searchParams.get("waterBody")) || "";
-  const waterBodies = useAsync(() => getWaterBodies(), []);
+  const waterBodies = useAsync(getWaterBodiesEnsuringDiscovery, [])
   const [waterBodyId, setWaterBodyId] = useState<number | "">(initialWaterBody);
   const observations = useAsync(() => getSatelliteObservations(waterBodyId === "" ? undefined : waterBodyId), [waterBodyId]);
   const [selected, setSelected] = useState<SatelliteObservation | null>(null);
