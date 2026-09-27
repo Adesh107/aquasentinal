@@ -310,3 +310,18 @@ tbody tr:hover { background: #fbfdfc; }
   .context-strip { align-items: flex-start; flex-direction: column; }
   .quality-values { display: grid; gap: 2px; }
 }
+
+/* Lake-data synchronization control */
+.button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.spin {
+  animation: aqua-spin 0.9s linear infinite;
+}
+
+@keyframes aqua-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
