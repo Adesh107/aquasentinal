@@ -88,9 +88,11 @@ class SpectralFeatures:
     spatial_maps: Dict[str, np.ndarray] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
-        data = asdict(self)
-        data.pop("spatial_maps", None)
-        return data
+        return {
+            key: getattr(self, key)
+            for key in self.__dataclass_fields__
+            if key != "spatial_maps"
+        }
 
 
 class SpectralFeatureExtractor:
