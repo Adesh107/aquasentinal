@@ -4,6 +4,7 @@ import type {
   AnomalyHistoryResponse,
   ComparisonResponse,
   GeoJsonFeature,
+  GeoJsonFeatureCollection,
   SatelliteObservation,
   TrendResponse,
   WaterBody,
@@ -195,7 +196,7 @@ export async function getAlert(id: number) {
 }
 
 export async function getAlertGeometry(id: number) {
-  return request<GeoJsonFeature>(`/alerts/${id}/geometry`);
+  return request<GeoJsonFeature | GeoJsonFeatureCollection>(`/alerts/${id}/geometry`);
 }
 
 export async function createAlert(payload: {
