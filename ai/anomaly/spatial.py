@@ -147,6 +147,7 @@ class SpatialAnomalyMapper:
         transform = profile["transform"]
         pixel_area_km2 = abs(
             float(transform.a) * float(transform.e)
+            - float(transform.b) * float(transform.d)
         ) / 1_000_000.0
 
         confidence_values = np.asarray(confidence_map, dtype=np.float32)
@@ -170,7 +171,11 @@ class SpatialAnomalyMapper:
                 continue
 
             native_geom = shape(geom)
-            pixel_count = int(round(native_geom.area / abs(float(transform.a) * float(transform.e))))
+            native_pixel_area = abs(
+                float(transform.a) * float(transform.e)
+                - float(transform.b) * float(transform.d)
+            )
+            pixel_count = int(round(native_geom.area / native_pixel_area))
             if pixel_count < self.MIN_COMPONENT_PIXELS:
                 continue
 
