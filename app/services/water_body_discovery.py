@@ -25,42 +25,24 @@ logger = logging.getLogger("AquaSentinel.WaterBodyDiscovery")
 DEFAULT_OVERPASS_URLS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
 )
 
-# Bounding box is only the fallback when the Maharashtra administrative area
-# lookup is unavailable.
 MAHARASHTRA_BBOX = (15.50, 72.50, 22.20, 81.00)
+OVERPASS_QUERY_TIMEOUT_SECONDS = 25
+OVERPASS_HTTP_TIMEOUT_SECONDS = 35
 
 
-def _overpass_query(use_area: bool) -> str:
-    if use_area:
-        selector = """
-        area["ISO3166-2"="IN-MH"]["boundary"="administrative"]->.maharashtra;
-        (
-          way["natural"="water"]["name"](area.maharashtra);
-          way["water"~"^(lake|reservoir)$"]["name"](area.maharashtra);
-          way["landuse"="reservoir"]["name"](area.maharashtra);
-          relation["natural"="water"]["name"](area.maharashtra);
-          relation["water"~"^(lake|reservoir)$"]["name"](area.maharashtra);
-        );
-        """
-    else:
-        south, west, north, east = MAHARASHTRA_BBOX
-        selector = f"""
-        (
-          way["natural"="water"]["name"]({south},{west},{north},{east});
-          way["water"~"^(lake|reservoir)$"]["name"]({south},{west},{north},{east});
-          way["landuse"="reservoir"]["name"]({south},{west},{north},{east});
-          relation["natural"="water"]["name"]({south},{west},{north},{east});
-          relation["water"~"^(lake|reservoir)$"]["name"]({south},{west},{north},{east});
-        );
-        """
-
+def _overpass_query() -> str:
+    """Keep the discovery query bounded: ways only, named inland water, Maharashtra bbox."""
+    south, west, north, east = MAHARASHTRA_BBOX
     return f"""
-    [out:json][timeout:90];
-    {selector}
-    out tags geom;
+    [out:json][timeout:{OVERPASS_QUERY_TIMEOUT_SECONDS}];
+    (
+      way["natural"="water"]["name"]({south},{west},{north},{east});
+      way["water"~"^(lake|reservoir)$"]["name"]({south},{west},{north},{east});
+      way["landuse"="reservoir"]["name"]({south},{west},{north},{east});
+    );
+    out tags geom qt;
     """
 
 
@@ -150,40 +132,36 @@ def _district_from_tags(tags: dict[str, Any]) -> str | None:
 def _fetch_elements() -> tuple[list[dict[str, Any]], str]:
     configured = os.getenv("OVERPASS_API_URL")
     endpoints = (configured,) if configured else DEFAULT_OVERPASS_URLS
-
+    query = _overpass_query()
     last_error: Exception | None = None
 
-    for use_area in (True, False):
-        query = _overpass_query(use_area)
-        for endpoint in endpoints:
-            try:
-                response = requests.post(
-                    endpoint,
-                    data=query,
-                    headers={"User-Agent": "AquaSentinel/1.0 water-body-discovery"},
-                    timeout=120,
-                )
-                response.raise_for_status()
-                payload = response.json()
-                elements = payload.get("elements", [])
-                logger.info(
-                    "Water-body discovery returned %s elements from %s (%s selector).",
-                    len(elements),
-                    endpoint,
-                    "Maharashtra area" if use_area else "Maharashtra bbox",
-                )
-                if elements:
-                    return elements, endpoint
-                last_error = RuntimeError(
-                    f"Overpass returned no named water elements using "
-                    f"{'Maharashtra area' if use_area else 'Maharashtra bbox'}."
-                )
-            except (requests.RequestException, ValueError) as exc:
-                last_error = exc
-                logger.warning("Overpass request failed at %s: %s", endpoint, exc)
+    for endpoint in endpoints:
+        try:
+            response = requests.post(
+                endpoint,
+                data=query,
+                headers={"User-Agent": "AquaSentinel/1.0 water-body-discovery"},
+                timeout=OVERPASS_HTTP_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            elements = payload.get("elements", [])
+            logger.info(
+                "Water-body discovery returned %s elements from %s.",
+                len(elements),
+                endpoint,
+            )
+            if elements:
+                return elements, endpoint
+            last_error = RuntimeError(
+                "Overpass returned no named Maharashtra water-body ways."
+            )
+        except (requests.RequestException, ValueError) as exc:
+            last_error = exc
+            logger.warning("Overpass request failed at %s: %s", endpoint, exc)
 
     raise RuntimeError(
-        "Unable to fetch Maharashtra water bodies from any Overpass endpoint."
+        "Unable to fetch Maharashtra water bodies from Overpass within the timeout."
     ) from last_error
 
 
