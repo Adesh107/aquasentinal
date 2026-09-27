@@ -38,7 +38,7 @@ class HistoricalBaselineQualityTests(unittest.TestCase):
             self.assertEqual(baseline.status, "insufficient")
             self.assertEqual(baseline.num_observations, 2)
 
-    def test_warning_observations_do_not_enter_baseline(self):
+    def test_warning_observations_remain_baseline_eligible(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = HistoricalBaseline(Path(tmp))
             manager.add_observation(
@@ -53,8 +53,9 @@ class HistoricalBaselineQualityTests(unittest.TestCase):
 
             baseline = manager.compute_baseline("WB_TEST")
 
-            self.assertEqual(baseline.status, "insufficient")
-            self.assertEqual(baseline.num_observations, 2)
+            self.assertEqual(baseline.status, "valid")
+            self.assertEqual(baseline.num_observations, 3)
+            self.assertAlmostEqual(baseline.turbidity_stats["mean"], 0.20)
 
     def test_three_quality_passed_observations_make_valid_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:
