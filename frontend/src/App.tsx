@@ -523,25 +523,46 @@ function WaterBodyMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    const source = map.getSource("water-bodies") as maplibregl.GeoJSONSource | undefined;
-    source?.setData(featureCollection);
-    const selectedLayer = map.getLayer("water-body-points");
-    if (selectedLayer) {
-      map.setPaintProperty("water-body-points", "circle-radius", ["case", ["==", ["get", "id"], selectedId ?? -1], 8, 5]);
-    }
-    const alertSource = map.getSource("alert-geometry") as maplibregl.GeoJSONSource | undefined;
-    alertSource?.setData(alertCollection);
+    if (!map) return;
 
-    if (features.length > 0) {
-      const bounds = new maplibregl.LngLatBounds();
-      features.forEach((waterBody) => {
-        waterBody.geometry.coordinates[0]?.forEach(([lng, lat]) => bounds.extend([lng, lat]));
-      });
-      if (!bounds.isEmpty()) {
-        map.fitBounds(bounds, { padding: 50, maxZoom: 9, duration: 400 });
+    const syncMapData = () => {
+      if (!map.isStyleLoaded()) return;
+
+      const source = map.getSource("water-bodies") as maplibregl.GeoJSONSource | undefined;
+      source?.setData(featureCollection);
+
+      const selectedLayer = map.getLayer("water-body-points");
+      if (selectedLayer) {
+        map.setPaintProperty(
+          "water-body-points",
+          "circle-radius",
+          ["case", ["==", ["get", "id"], selectedId ?? -1], 8, 5],
+        );
       }
+
+      const alertSource = map.getSource("alert-geometry") as maplibregl.GeoJSONSource | undefined;
+      alertSource?.setData(alertCollection);
+
+      if (features.length > 0) {
+        const bounds = new maplibregl.LngLatBounds();
+        features.forEach((waterBody) => {
+          waterBody.geometry.coordinates[0]?.forEach(([lng, lat]) => bounds.extend([lng, lat]));
+        });
+        if (!bounds.isEmpty()) {
+          map.fitBounds(bounds, { padding: 50, maxZoom: 9, duration: 400 });
+        }
+      }
+    };
+
+    if (map.isStyleLoaded()) {
+      syncMapData();
+      return;
     }
+
+    map.once("load", syncMapData);
+    return () => {
+      map.off("load", syncMapData);
+    };
   }, [featureCollection, alertCollection, selectedId, features]);
 
   return <div className="map-container" style={{ height }}><div ref={nodeRef} className="map-canvas" />{waterBodies.length === 0 && <div className="map-empty"><MapPin size={18} /><span>No water-body geometry returned by the API.</span></div>}</div>;
@@ -747,7 +768,8 @@ function WaterBodyDetailPage() {
   const alerts = useAsync(() => getAlerts({ water_body_id: id }), [id]);
 
   const latestObservation = observations.data?.[0] ?? null;
-  const latestAnalysis = analyses.data?.[0] ?? null;
+  const latestAnalysis =
+    analyses.data?.find((analysis) => analysis.observation_id === latestObservation?.id) ?? null;
   const activeAlert = alerts.data?.find((a) => a.status.toLowerCase() === "active") ?? null;
   const [metric, setMetric] = useState<"turbidity" | "chlorophyll" | "anomaly_score">("anomaly_score");
 
@@ -800,7 +822,11 @@ function WaterBodyDetailPage() {
             <MetricCard label="Turbidity" value={numberOrDash(latestAnalysis.analysis_data.turbidity)} note="Reported by analysis" />
             <MetricCard label="Chlorophyll indicator" value={numberOrDash(latestAnalysis.analysis_data.chlorophyll)} note="Reported by analysis" />
             <MetricCard label="Anomaly score" value={numberOrDash(latestAnalysis.analysis_data.anomaly_score)} note={latestAnalysis.analysis_data.anomaly_detected ? "Anomaly detected" : "No anomaly detected"} status={latestAnalysis.analysis_data.anomaly_detected ? "alert" : "success"} />
-            <MetricCard label="Confidence" value={percentOrDash(latestAnalysis.analysis_data.confidence)} note="Analysis confidence" />
+            <MetricCard
+              label="Segmentation confidence"
+              value={percentOrDash(latestAnalysis.analysis_data.spatial_anomaly?.confidence)}
+              note="Mean model confidence on flagged pixels"
+            />
           </div>}
         {latestAnalysis?.analysis_data.evidence?.length ? <div className="evidence-strip"><div className="evidence-heading"><Sparkles size={14} /> Supporting evidence</div><div className="evidence-list">{latestAnalysis.analysis_data.evidence.map((item, index) => <span key={index}>{item}</span>)}</div></div> : null}
       </section>
