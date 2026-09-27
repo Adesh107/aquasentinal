@@ -92,7 +92,14 @@ export async function discoverWaterBodies(limit = 60) {
 
 export async function getWaterBodiesEnsuringDiscovery() {
   const current = await getWaterBodies();
-  if (current.length > 0) return current;
+  const hasRealImportedWaterBodies = current.some(
+    (waterBody) => waterBody.source.toLowerCase() === "openstreetmap",
+  );
+
+  // Keep existing manual records, but make sure a fresh database/demo instance
+  // also gets a real Maharashtra water-body inventory.
+  if (hasRealImportedWaterBodies) return current;
+
   await discoverWaterBodies(60);
   return getWaterBodies();
 }
