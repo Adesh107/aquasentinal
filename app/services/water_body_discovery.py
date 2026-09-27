@@ -1,17 +1,27 @@
 """
-OpenStreetMap water-body discovery for AquaSentinel.
+Water-body discovery/import for AquaSentinel.
 
-The discovery step provides real named water-body footprints for the application.
-It uses the read-only Overpass API and stores only validated Polygon geometries
-in the existing PostGIS water_bodies table. Satellite analysis remains a separate
-step: discovered water bodies are then used as the spatial target for Sentinel-2.
+Primary source:
+- NWDP/ISRO Surface Waterbodies Maharashtra GeoJSON (official Indian water-data
+  portal; boundaries extracted from satellite imagery).
+
+Fallback:
+- OpenStreetMap Overpass for named Maharashtra lakes/reservoirs.
+
+Satellite analysis remains a separate step: imported water bodies are used as
+the spatial targets for Sentinel-2 analysis.
 """
 from __future__ import annotations
 
 import logging
 import os
+import tempfile
+from io import BytesIO
+from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
 
+import geopandas as gpd
 import requests
 from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.ops import polygonize, unary_union
@@ -22,7 +32,16 @@ from app.models import WaterBody
 
 logger = logging.getLogger("AquaSentinel.WaterBodyDiscovery")
 
+# Official NWDP/ISRO state-wise surface-waterbody boundary resource.
+DEFAULT_NWDP_MAHARASHTRA_URL = (
+    "https://nwdp.nwic.gov.in/dataset/"
+    "811f6a62-61c2-4d79-b90b-deeee4151f6d/resource/"
+    "2fae6ca8-4513-4bbc-98ca-56486fcb83f0/download/wb_mh_geojson.zip"
+)
+NWDP_HTTP_TIMEOUT_SECONDS = 90
+
 DEFAULT_OVERPASS_URLS = (
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 )
@@ -33,7 +52,7 @@ OVERPASS_HTTP_TIMEOUT_SECONDS = 35
 
 
 def _overpass_query() -> str:
-    """Keep the discovery query bounded: ways only, named inland water, Maharashtra bbox."""
+    """Keep the fallback OSM query bounded: named inland water ways only."""
     south, west, north, east = MAHARASHTRA_BBOX
     return f"""
     [out:json][timeout:{OVERPASS_QUERY_TIMEOUT_SECONDS}];
@@ -47,7 +66,7 @@ def _overpass_query() -> str:
 
 
 def _polygon_from_element(element: dict[str, Any]) -> Polygon | None:
-    """Convert an OSM way or water multipolygon relation to a usable Polygon."""
+    """Convert an OSM way/relation to a usable Polygon."""
     if element.get("type") == "relation":
         lines = []
         for member in element.get("members") or []:
@@ -61,15 +80,19 @@ def _polygon_from_element(element: dict[str, Any]) -> Polygon | None:
                 lines.append(LineString(coordinates))
             except ValueError:
                 continue
+
         if not lines:
             return None
+
         try:
             merged = unary_union(lines)
             polygons = list(polygonize(merged))
         except Exception:
             return None
+
         if not polygons:
             return None
+
         polygonal = unary_union(polygons)
         if isinstance(polygonal, MultiPolygon):
             polygon = max(polygonal.geoms, key=lambda item: item.area)
@@ -124,12 +147,155 @@ def _district_from_tags(tags: dict[str, Any]) -> str | None:
         or tags.get("district")
         or tags.get("is_in:district")
     )
-    if value:
-        return str(value)[:100]
+    return str(value)[:100] if value else None
+
+
+def _normalise_field(value: Any) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def _row_value(row: Any, candidates: tuple[str, ...]) -> str | None:
+    wanted = {_normalise_field(value) for value in candidates}
+    for column in row.index:
+        if _normalise_field(column) not in wanted:
+            continue
+        value = row[column]
+        if value is None:
+            continue
+        text_value = str(value).strip()
+        if text_value and text_value.lower() not in {"nan", "none", "null"}:
+            return text_value
     return None
 
 
-def _fetch_elements() -> tuple[list[dict[str, Any]], str]:
+def _largest_polygon(geometry: Any) -> Polygon | None:
+    if isinstance(geometry, Polygon):
+        polygon = geometry
+    elif isinstance(geometry, MultiPolygon):
+        polygon = max(geometry.geoms, key=lambda item: item.area)
+    else:
+        return None
+
+    if polygon.is_empty or polygon.area <= 0:
+        return None
+
+    if not polygon.is_valid:
+        repaired = polygon.buffer(0)
+        if isinstance(repaired, Polygon):
+            polygon = repaired
+        elif isinstance(repaired, MultiPolygon):
+            polygon = max(repaired.geoms, key=lambda item: item.area)
+        else:
+            return None
+
+    return polygon if polygon.is_valid and polygon.area > 0 else None
+
+
+def _fetch_nwdp_candidates(limit: int) -> tuple[list[dict[str, Any]], str]:
+    configured_file = os.getenv("NWDP_MAHARASHTRA_FILE")
+    configured_url = os.getenv("NWDP_MAHARASHTRA_GEOJSON_URL", DEFAULT_NWDP_MAHARASHTRA_URL)
+
+    with tempfile.TemporaryDirectory(prefix="aquasentinel-nwdp-") as temp_dir:
+        if configured_file:
+            archive_path = Path(configured_file).expanduser()
+            if not archive_path.exists():
+                raise RuntimeError(f"NWDP file not found: {archive_path}")
+            archive_bytes = archive_path.read_bytes()
+            source = str(archive_path)
+        else:
+            response = requests.get(
+                configured_url,
+                headers={"User-Agent": "AquaSentinel/1.0 water-body-import"},
+                timeout=NWDP_HTTP_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            archive_bytes = response.content
+            source = configured_url
+
+        zip_path = Path(temp_dir) / "waterbodies.zip"
+        zip_path.write_bytes(archive_bytes)
+
+        with ZipFile(zip_path) as archive:
+            geojson_names = [
+                name for name in archive.namelist()
+                if name.lower().endswith((".geojson", ".json"))
+            ]
+            if not geojson_names:
+                raise RuntimeError("NWDP archive contains no GeoJSON file.")
+            archive.extract(geojson_names[0], temp_dir)
+            geojson_path = Path(temp_dir) / geojson_names[0]
+
+        gdf = gpd.read_file(geojson_path)
+        if gdf.empty:
+            raise RuntimeError("NWDP Maharashtra GeoJSON contains no features.")
+
+        if gdf.crs is None:
+            gdf = gdf.set_crs(4326)
+        else:
+            gdf = gdf.to_crs(4326)
+
+        named: list[dict[str, Any]] = []
+        unnamed: list[dict[str, Any]] = []
+
+        for index, row in gdf.iterrows():
+            polygon = _largest_polygon(row.geometry)
+            if polygon is None:
+                continue
+
+            area_sq_km = (
+                gpd.GeoSeries([polygon], crs=4326)
+                .to_crs(6933)
+                .area
+                .iloc[0]
+                / 1_000_000.0
+            )
+            if area_sq_km < 0.001:
+                continue
+
+            name = _row_value(
+                row,
+                (
+                    "name",
+                    "waterbody_name",
+                    "waterbodyname",
+                    "wb_name",
+                    "wbname",
+                    "lake_name",
+                    "reservoir_name",
+                    "local_name",
+                ),
+            )
+            district = _row_value(
+                row,
+                ("district", "district_name", "districtname", "dist_name", "distname"),
+            )
+            type_value = _row_value(
+                row,
+                ("type", "waterbody_type", "waterbodytype", "category", "class"),
+            )
+            water_type = type_value[:100] if type_value else "Water body"
+
+            candidate = {
+                "name": name[:200] if name else f"Maharashtra Waterbody {index + 1}",
+                "type": water_type,
+                "district": district[:100] if district else None,
+                "polygon": polygon,
+                "osm_id": None,
+                "area_sq_km_hint": float(area_sq_km),
+            }
+            (named if name else unnamed).append(candidate)
+
+        candidates = sorted(named, key=lambda item: item["area_sq_km_hint"], reverse=True)
+        candidates.extend(
+            sorted(unnamed, key=lambda item: item["area_sq_km_hint"], reverse=True)
+        )
+        if not candidates:
+            raise RuntimeError("NWDP Maharashtra GeoJSON had no usable polygon water bodies.")
+
+        return candidates[:limit], source
+
+
+def _fetch_overpass_elements() -> tuple[list[dict[str, Any]], str]:
     configured = os.getenv("OVERPASS_API_URL")
     endpoints = (configured,) if configured else DEFAULT_OVERPASS_URLS
     query = _overpass_query()
@@ -146,57 +312,19 @@ def _fetch_elements() -> tuple[list[dict[str, Any]], str]:
             response.raise_for_status()
             payload = response.json()
             elements = payload.get("elements", [])
-            logger.info(
-                "Water-body discovery returned %s elements from %s.",
-                len(elements),
-                endpoint,
-            )
             if elements:
+                logger.info("Overpass returned %s elements from %s.", len(elements), endpoint)
                 return elements, endpoint
-            last_error = RuntimeError(
-                "Overpass returned no named Maharashtra water-body ways."
-            )
+            last_error = RuntimeError("Overpass returned no named Maharashtra water-body ways.")
         except (requests.RequestException, ValueError) as exc:
             last_error = exc
             logger.warning("Overpass request failed at %s: %s", endpoint, exc)
 
-    raise RuntimeError(
-        "Unable to fetch Maharashtra water bodies from Overpass within the timeout."
-    ) from last_error
+    raise RuntimeError("Unable to fetch Maharashtra water bodies from available Overpass endpoints.") from last_error
 
 
-def _area_sq_km(db: Session, water_body_id: int) -> float | None:
-    result = db.execute(
-        text(
-            """
-            SELECT ST_Area(
-                ST_Transform(geometry, 6933)
-            ) / 1000000.0
-            FROM water_bodies
-            WHERE id = :id
-            """
-        ),
-        {"id": water_body_id},
-    )
-    value = result.scalar()
-    return float(value) if value is not None else None
-
-
-def discover_and_import_water_bodies(
-    db: Session,
-    limit: int = 60,
-    min_area_sq_km: float = 0.02,
-) -> dict[str, Any]:
-    """
-    Discover named lakes/reservoirs in Maharashtra and upsert them by
-    (name, district, source). Returns imported/updated counts and records.
-
-    This is intentionally idempotent so the frontend can call it when the
-    database is empty without creating duplicate rows.
-    """
-    limit = max(1, min(int(limit), 200))
-    elements, endpoint = _fetch_elements()
-
+def _overpass_candidates(limit: int) -> tuple[list[dict[str, Any]], str]:
+    elements, endpoint = _fetch_overpass_elements()
     candidates: list[dict[str, Any]] = []
     seen: set[tuple[str, str | None, str]] = set()
 
@@ -210,12 +338,7 @@ def discover_and_import_water_bodies(
             continue
 
         polygon = _polygon_from_element(element)
-        if polygon is None:
-            continue
-
-        # Geographic area in degrees is only used as a first-pass filter.
-        # Final area is computed by PostGIS in a metre-based CRS below.
-        if polygon.area <= 1e-7:
+        if polygon is None or polygon.area <= 1e-7:
             continue
 
         water_type = _classify_type(tags)
@@ -235,16 +358,36 @@ def discover_and_import_water_bodies(
             }
         )
 
-    # Prefer larger named water bodies for a compact, useful demo inventory.
-    # The final exact area is still calculated by PostGIS after insertion.
     candidates.sort(key=lambda item: item["polygon"].area, reverse=True)
-    candidates = candidates[:limit]
+    return candidates[:limit], endpoint
 
+
+def _area_sq_km(db: Session, water_body_id: int) -> float | None:
+    result = db.execute(
+        text(
+            """
+            SELECT ST_Area(ST_Transform(geometry, 6933)) / 1000000.0
+            FROM water_bodies
+            WHERE id = :id
+            """
+        ),
+        {"id": water_body_id},
+    )
+    value = result.scalar()
+    return float(value) if value is not None else None
+
+
+def _upsert_candidates(
+    db: Session,
+    candidates: list[dict[str, Any]],
+    source: str,
+    limit: int,
+) -> dict[str, Any]:
     imported = 0
     updated = 0
     results: list[dict[str, Any]] = []
 
-    for candidate in candidates:
+    for candidate in candidates[:limit]:
         polygon = candidate["polygon"]
         coords = ", ".join(f"{lon} {lat}" for lon, lat in polygon.exterior.coords)
         wkt = f"POLYGON(({coords}))"
@@ -254,7 +397,7 @@ def discover_and_import_water_bodies(
             .filter(
                 WaterBody.name == candidate["name"],
                 WaterBody.type == candidate["type"],
-                WaterBody.source == "OpenStreetMap",
+                WaterBody.source == source,
             )
             .first()
         )
@@ -266,7 +409,7 @@ def discover_and_import_water_bodies(
                 district=candidate["district"],
                 state="Maharashtra",
                 geometry=wkt,
-                source="OpenStreetMap",
+                source=source,
                 active=True,
             )
             db.add(water_body)
@@ -290,18 +433,43 @@ def discover_and_import_water_bodies(
                 "district": water_body.district,
                 "area_sq_km": water_body.area_sq_km,
                 "source": water_body.source,
-                "osm_id": candidate["osm_id"],
+                "osm_id": candidate.get("osm_id"),
             }
         )
 
     db.commit()
 
     return {
-        "source": "OpenStreetMap Overpass",
-        "endpoint": endpoint,
+        "source": source,
+        "endpoint": source,
         "requested_limit": limit,
         "discovered": len(results),
         "imported": imported,
         "updated": updated,
         "water_bodies": results,
     }
+
+
+def discover_and_import_water_bodies(
+    db: Session,
+    limit: int = 60,
+    min_area_sq_km: float = 0.02,
+) -> dict[str, Any]:
+    """
+    Import real Maharashtra water-body boundaries.
+
+    NWDP/ISRO is attempted first. If it cannot be downloaded/parsed, fall back
+    to OSM Overpass. The import is idempotent.
+    """
+    del min_area_sq_km  # retained for backwards-compatible call signature
+    limit = max(1, min(int(limit), 200))
+
+    try:
+        candidates, source = _fetch_nwdp_candidates(limit)
+        logger.info("Using official NWDP/ISRO Maharashtra waterbody source: %s", source)
+        return _upsert_candidates(db, candidates, "NWDP-SAC", limit)
+    except Exception as exc:
+        logger.warning("NWDP waterbody import failed; falling back to Overpass: %s", exc)
+
+    candidates, endpoint = _overpass_candidates(limit)
+    return _upsert_candidates(db, candidates, "OpenStreetMap", limit)
