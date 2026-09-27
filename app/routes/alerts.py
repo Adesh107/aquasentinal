@@ -177,6 +177,20 @@ def get_alert_geometry(
         )
 
     if alert.geometry is None:
+        if alert.analysis_id is not None:
+            analysis_result = (
+                db.query(AnalysisResult)
+                .filter(AnalysisResult.id == alert.analysis_id)
+                .first()
+            )
+            anomaly_regions = (
+                analysis_result.analysis_data.get("geojson", {}).get("anomaly_regions")
+                if analysis_result is not None
+                else None
+            )
+            if anomaly_regions:
+                return anomaly_regions
+
         raise HTTPException(
             status_code=404,
             detail="No geometry is associated with this alert",
