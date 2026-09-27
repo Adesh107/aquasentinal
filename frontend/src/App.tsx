@@ -561,7 +561,7 @@ function WaterBodyMap({
           waterBody.geometry.coordinates[0]?.forEach(([lng, lat]) => bounds.extend([lng, lat]));
         });
         if (!bounds.isEmpty()) {
-          map.fitBounds(bounds, { padding: 50, maxZoom: 9, duration: 400 });
+          map.fitBounds(bounds, { padding: 50, maxZoom: features.length === 1 ? 14 : 9, duration: 400 });
         }
       }
 
@@ -599,7 +599,7 @@ function OverviewPage() {
   const selected = waterBodies.data?.find((item) => item.id === selectedId) ?? waterBodies.data?.[0] ?? null;
   const activeAlerts = alerts.data?.filter((a) => a.status.toLowerCase() === "active") ?? [];
   const recentAlerts = [...(alerts.data ?? [])].sort((a, b) => +new Date(b.date) - +new Date(a.date)).slice(0, 5);
-  const anyError = waterBodies.error || alerts.error || observations.error || analyses.error;
+  const anyError = waterBodies.error || alerts.error || alertGeometries.error || observations.error || analyses.error;
 
   return (
     <div>
@@ -638,6 +638,7 @@ function OverviewPage() {
           <div className="legend">
             <span><i className="legend-dot monitored" /> Monitored</span>
             <span><i className="legend-dot alert" /> Active alert</span>
+            <span><i className="legend-dot alert" /> Contamination hotspot</span>
           </div>
         </div>
         {waterBodies.loading ? <div className="map-loading"><div className="skeleton skeleton-full" /></div> :
