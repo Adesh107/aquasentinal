@@ -93,7 +93,7 @@ export async function discoverWaterBodies(limit = 60) {
 export async function getWaterBodiesEnsuringDiscovery() {
   const current = await getWaterBodies();
   const hasRealImportedWaterBodies = current.some(
-    (waterBody) => waterBody.source.toLowerCase() === "openstreetmap",
+    (waterBody) => !["manual"].includes(waterBody.source.toLowerCase()),
   );
 
   // Keep existing manual records, but make sure a fresh database/demo instance
