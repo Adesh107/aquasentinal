@@ -446,7 +446,9 @@ function WaterBodyMap({
       },
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), "top-right");
-    map.on("load", () => {
+    const setupMapLayers = () => {
+      if (map.getSource("water-bodies")) return;
+
       map.addSource("water-bodies", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -490,7 +492,7 @@ function WaterBodyMap({
         source: "alert-geometry",
         paint: {
           "fill-color": "#b84a3c",
-          "fill-opacity": 0.26,
+          "fill-opacity": 0.42,
         },
       });
       map.addLayer({
@@ -499,7 +501,7 @@ function WaterBodyMap({
         source: "alert-geometry",
         paint: {
           "line-color": "#b84a3c",
-          "line-width": 3,
+          "line-width": 4,
         },
       });
 
@@ -513,7 +515,13 @@ function WaterBodyMap({
       map.on("mouseleave", "water-body-points", () => { map.getCanvas().style.cursor = ""; });
       map.on("mouseenter", "water-body-fill", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "water-body-fill", () => { map.getCanvas().style.cursor = ""; });
-    });
+    };
+
+    map.on("load", setupMapLayers);
+    if (map.isStyleLoaded()) {
+      setupMapLayers();
+    }
+
     mapRef.current = map;
     return () => {
       map.remove();
@@ -526,10 +534,13 @@ function WaterBodyMap({
     if (!map) return;
 
     const syncMapData = () => {
-      if (!map.isStyleLoaded()) return;
+      if (!map.isStyleLoaded()) return false;
 
       const source = map.getSource("water-bodies") as maplibregl.GeoJSONSource | undefined;
-      source?.setData(featureCollection);
+      const alertSource = map.getSource("alert-geometry") as maplibregl.GeoJSONSource | undefined;
+      if (!source || !alertSource) return false;
+
+      source.setData(featureCollection);
 
       const selectedLayer = map.getLayer("water-body-points");
       if (selectedLayer) {
@@ -540,8 +551,7 @@ function WaterBodyMap({
         );
       }
 
-      const alertSource = map.getSource("alert-geometry") as maplibregl.GeoJSONSource | undefined;
-      alertSource?.setData(alertCollection);
+      alertSource.setData(alertCollection);
 
       if (features.length > 0) {
         const bounds = new maplibregl.LngLatBounds();
@@ -552,16 +562,23 @@ function WaterBodyMap({
           map.fitBounds(bounds, { padding: 50, maxZoom: 9, duration: 400 });
         }
       }
+
+      return true;
     };
 
-    if (map.isStyleLoaded()) {
-      syncMapData();
+    if (syncMapData()) {
       return;
     }
 
-    map.once("load", syncMapData);
+    const retrySync = () => {
+      syncMapData();
+    };
+
+    map.on("load", retrySync);
+    map.on("styledata", retrySync);
     return () => {
-      map.off("load", syncMapData);
+      map.off("load", retrySync);
+      map.off("styledata", retrySync);
     };
   }, [featureCollection, alertCollection, selectedId, features]);
 
@@ -770,7 +787,19 @@ function WaterBodyDetailPage() {
   const latestObservation = observations.data?.[0] ?? null;
   const latestAnalysis =
     analyses.data?.find((analysis) => analysis.observation_id === latestObservation?.id) ?? null;
-  const activeAlert = alerts.data?.find((a) => a.status.toLowerCase() === "active") ?? null;
+  const activeAlert =
+    alerts.data?.find(
+      (alert) =>
+        alert.status.toLowerCase() === "active" &&
+        alert.analysis_id != null &&
+        alert.analysis_id === latestAnalysis?.id,
+    ) ??
+    alerts.data?.find((alert) => alert.status.toLowerCase() === "active") ??
+    null;
+  const activeAlertGeometry = useAsync(
+    () => (activeAlert ? getAlertGeometry(activeAlert.id) : Promise.resolve(null)),
+    [activeAlert?.id],
+  );
   const [metric, setMetric] = useState<"turbidity" | "chlorophyll" | "anomaly_score">("anomaly_score");
 
   if (!Number.isFinite(id)) return <Navigate to="/water-bodies" replace />;
@@ -796,7 +825,11 @@ function WaterBodyDetailPage() {
             waterBodies={[waterBody.data]}
             alerts={alerts.data ?? []}
             selectedId={id}
-            alertFeature={latestAnalysis?.analysis_data.geojson?.anomaly_regions ?? null}
+            alertFeature={
+              latestAnalysis?.analysis_data.geojson?.anomaly_regions ??
+              activeAlertGeometry.data ??
+              null
+            }
             height={360}
           />
           </div>
