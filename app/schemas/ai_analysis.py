@@ -67,6 +67,8 @@ class AIAnalyzeResponse(BaseModel):
     anomaly_explanation: list[str]
     anomaly_individual_scores: dict[str, float]
 
+    spatial_anomaly: dict = Field(default_factory=dict)
+
     # No synthetic anomaly polygon is returned. Spatial anomaly geometry
     # requires pixel-level anomaly masks, not a scaled copy of the water boundary.
     water_boundary: dict
