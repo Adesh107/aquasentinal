@@ -52,15 +52,29 @@ def _prior_baseline(
     observation_date: str,
 ):
     history = list(manager.load_history(water_body_id))
-    # Exclude an existing record for the exact same observation date so a
-    # re-run cannot score an observation against its own previous run.
+    target = datetime.fromisoformat(observation_date.replace("Z", "+00:00"))
+    if target.tzinfo is None:
+        target = target.replace(tzinfo=timezone.utc)
+    target = target.astimezone(timezone.utc)
+
+    def _record_datetime(record: ObservationRecord) -> datetime:
+        value = datetime.fromisoformat(record.observation_date.replace("Z", "+00:00"))
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    # Baselines are strictly historical: only observations earlier than the
+    # current satellite acquisition may influence its anomaly score. This
+    # prevents future observations and same-date re-runs from leaking into
+    # the baseline.
     manager._histories[water_body_id] = [
         record for record in history
-        if record.observation_date != observation_date
+        if _record_datetime(record) < target
     ]
-    baseline = manager.compute_baseline(water_body_id)
-    manager._histories[water_body_id] = history
-    return baseline
+    try:
+        return manager.compute_baseline(water_body_id)
+    finally:
+        manager._histories[water_body_id] = history
 
 
 def run_satellite_analysis(
@@ -144,7 +158,8 @@ def run_satellite_analysis(
     baseline_manager.add_observation(record)
 
     # Quality problems and review warnings take precedence over baseline
-    # availability. A warned mask must not silently enter the baseline.
+    # availability in the pipeline status. Warning observations remain
+    # auditable and may still be baseline-eligible when the hard guard passed.
     if not segmentation.quality_report.is_valid:
         pipeline_status = "degraded"
     elif segmentation.quality_report.status != "ok":
