@@ -25,6 +25,7 @@ from ai.inference.indicators import IndicatorEngine
 from ai.preprocessing.preprocessor import SentinelPreprocessor
 from ai.satellite.client import PlanetaryComputerSentinelClient
 from ai.segmentation.waternet import WaterNetSegmenter
+from ai.anomaly.spatial import SpatialAnomalyMapper
 
 
 SCHEMA_VERSION = "1.0.0"
@@ -141,6 +142,22 @@ def run_satellite_analysis(
         baseline=baseline,
     )
 
+    spatial = (
+        SpatialAnomalyMapper().build(
+            spatial_maps=spectral.spatial_maps,
+            water_mask=segmentation.water_mask,
+            confidence_map=segmentation.confidence_map,
+            baseline_stats={
+                "turbidity": baseline.turbidity_stats,
+                "chlorophyll": baseline.chlorophyll_stats,
+                "algal": baseline.algal_stats,
+            },
+            profile=segmentation.profile,
+        )
+        if baseline.status == "valid"
+        else SpatialAnomalyMapper._empty()
+    )
+
     record = ObservationRecord(
         water_body_id=ai_water_body_id,
         observation_date=observation_key,
@@ -202,7 +219,7 @@ def run_satellite_analysis(
         "algal_indicator": float(indicators.algal_indicator),
         "anomaly_score": float(anomaly.anomaly_score),
         "anomaly_level": anomaly.anomaly_level,
-        "affected_area_km2": None,
+        "affected_area_km2": spatial.affected_area_km2,
         "baseline_status": anomaly.baseline_status,
         "baseline_observation_count": int(baseline.num_observations),
         "observation_quality": {
@@ -235,7 +252,12 @@ def run_satellite_analysis(
         "anomaly_explanation": list(anomaly.explanation),
         "anomaly_individual_scores": dict(anomaly.individual_scores),
         "water_boundary": boundary_feature,
-        "anomaly_regions": None,
+        "anomaly_regions": spatial.anomaly_regions,
+        "spatial_anomaly": {
+            "mode": spatial.spatial_mode,
+            "anomalous_pixels": spatial.anomalous_pixels,
+            "confidence": spatial.confidence,
+        },
         "satellite_metadata": {
             "stac_collection": "sentinel-2-l2a",
             "source_reference": satellite_observation.source_reference,

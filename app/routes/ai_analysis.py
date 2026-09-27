@@ -115,8 +115,9 @@ def analyze_water_body(
         "evidence": result["anomaly_explanation"],
         "geojson": {
             "water_boundary": result["water_boundary"],
-            "anomaly_regions": None,
+            "anomaly_regions": result["anomaly_regions"],
         },
+        "spatial_anomaly": result["spatial_anomaly"],
     }
 
     analysis = AnalysisResult(
@@ -153,12 +154,16 @@ def analyze_water_body(
             ),
             indicator=indicator,
             severity=result["anomaly_level"],
-            confidence=None,
-            affected_area_km2=None,
+            confidence=result["spatial_anomaly"]["confidence"],
+            affected_area_km2=result["affected_area_km2"],
             explanation={
                 "messages": result["anomaly_explanation"],
                 "indicator_scores": result["anomaly_individual_scores"],
-                "spatial_note": "Affected-area geometry is not spatially resolved yet.",
+                "spatial_note": (
+                    "Spatial anomaly regions use a global historical baseline applied "
+                    "to current pixel-level spectral composites; they are a localization "
+                    "proxy, not a per-pixel historical baseline."
+                ),
             },
             geometry=None,
             status="active",
