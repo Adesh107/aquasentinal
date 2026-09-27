@@ -35,6 +35,9 @@ export type AnalysisData = {
   anomaly_detected: boolean;
   confidence: number | null;
   evidence: string[];
+  affected_area_km2?: number | null;
+  geojson?: AnalysisGeoJson;
+  spatial_anomaly?: AnomalySpatialData;
 };
 
 export type AnalysisResult = {
@@ -60,11 +63,34 @@ export type Alert = {
   created_at: string;
 };
 
+export type GeoJsonGeometry =
+  | PolygonGeometry
+  | {
+      type: "MultiPolygon";
+      coordinates: number[][][][];
+    };
+
 export type GeoJsonFeature = {
   type: "Feature";
-  id: number;
+  id?: number | string;
   properties: Record<string, unknown>;
-  geometry: PolygonGeometry;
+  geometry: GeoJsonGeometry;
+};
+
+export type GeoJsonFeatureCollection = {
+  type: "FeatureCollection";
+  features: GeoJsonFeature[];
+};
+
+export type AnomalySpatialData = {
+  mode: string;
+  anomalous_pixels: number;
+  confidence: number | null;
+};
+
+export type AnalysisGeoJson = {
+  water_boundary?: GeoJsonFeature | null;
+  anomaly_regions?: GeoJsonFeatureCollection | null;
 };
 
 export type TimelineEntry = {
