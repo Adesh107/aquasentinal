@@ -13,7 +13,8 @@ import os
 from typing import Any
 
 import requests
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.ops import polygonize, unary_union
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -40,6 +41,8 @@ def _overpass_query(use_area: bool) -> str:
           way["natural"="water"]["name"](area.maharashtra);
           way["water"~"^(lake|reservoir)$"]["name"](area.maharashtra);
           way["landuse"="reservoir"]["name"](area.maharashtra);
+          relation["natural"="water"]["name"](area.maharashtra);
+          relation["water"~"^(lake|reservoir)$"]["name"](area.maharashtra);
         );
         """
     else:
@@ -49,6 +52,8 @@ def _overpass_query(use_area: bool) -> str:
           way["natural"="water"]["name"]({south},{west},{north},{east});
           way["water"~"^(lake|reservoir)$"]["name"]({south},{west},{north},{east});
           way["landuse"="reservoir"]["name"]({south},{west},{north},{east});
+          relation["natural"="water"]["name"]({south},{west},{north},{east});
+          relation["water"~"^(lake|reservoir)$"]["name"]({south},{west},{north},{east});
         );
         """
 
@@ -60,23 +65,53 @@ def _overpass_query(use_area: bool) -> str:
 
 
 def _polygon_from_element(element: dict[str, Any]) -> Polygon | None:
-    geometry = element.get("geometry") or []
-    if len(geometry) < 4:
-        return None
+    """Convert an OSM way or water multipolygon relation to a usable Polygon."""
+    if element.get("type") == "relation":
+        lines = []
+        for member in element.get("members") or []:
+            if member.get("type") != "way" or member.get("role") not in {"outer", ""}:
+                continue
+            points = member.get("geometry") or []
+            if len(points) < 2:
+                continue
+            coordinates = [(float(point["lon"]), float(point["lat"])) for point in points]
+            try:
+                lines.append(LineString(coordinates))
+            except ValueError:
+                continue
+        if not lines:
+            return None
+        try:
+            merged = unary_union(lines)
+            polygons = list(polygonize(merged))
+        except Exception:
+            return None
+        if not polygons:
+            return None
+        polygonal = unary_union(polygons)
+        if isinstance(polygonal, MultiPolygon):
+            polygon = max(polygonal.geoms, key=lambda item: item.area)
+        elif isinstance(polygonal, Polygon):
+            polygon = polygonal
+        else:
+            return None
+    else:
+        geometry = element.get("geometry") or []
+        if len(geometry) < 4:
+            return None
+        coordinates = [(float(point["lon"]), float(point["lat"])) for point in geometry]
+        if coordinates[0] != coordinates[-1]:
+            return None
+        polygon = Polygon(coordinates)
 
-    coordinates = [(float(point["lon"]), float(point["lat"])) for point in geometry]
-    if coordinates[0] != coordinates[-1]:
-        return None
-
-    polygon = Polygon(coordinates)
     if polygon.is_empty or polygon.area <= 0:
         return None
 
     if not polygon.is_valid:
         repaired = polygon.buffer(0)
-        if repaired.geom_type == "Polygon":
+        if isinstance(repaired, Polygon):
             polygon = repaired
-        elif repaired.geom_type == "MultiPolygon":
+        elif isinstance(repaired, MultiPolygon):
             polygon = max(repaired.geoms, key=lambda item: item.area)
         else:
             return None
@@ -183,7 +218,7 @@ def discover_and_import_water_bodies(
     seen: set[tuple[str, str | None, str]] = set()
 
     for element in elements:
-        if element.get("type") != "way":
+        if element.get("type") not in {"way", "relation"}:
             continue
 
         tags = element.get("tags") or {}
