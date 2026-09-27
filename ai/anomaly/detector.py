@@ -185,10 +185,26 @@ class AnomalyDetector:
         individual_scores["area"] = area_score
         explanations.extend(area_explanations)
 
-        # Check compound anomalies
-        if turb_score > 0.5 and chl_score > 0.5:
+        # Compound explanations describe simultaneous elevation, so a
+        # large absolute anomaly score is not sufficient by itself.
+        turbidity_elevated = current_turbidity > baseline.turbidity_stats.get("mean", 0.0)
+        chlorophyll_elevated = current_chlorophyll > baseline.chlorophyll_stats.get("mean", 0.0)
+        algal_elevated = current_algal > baseline.algal_stats.get("mean", 0.0)
+
+        if (
+            turb_score > 0.5
+            and chl_score > 0.5
+            and turbidity_elevated
+            and chlorophyll_elevated
+        ):
             explanations.append(AnomalyTaxonomy.COMPOUND_TURBIDITY_CHLOROPHYLL)
-        if chl_score > 0.5 and alg_score > 0.5:
+
+        if (
+            chl_score > 0.5
+            and alg_score > 0.5
+            and chlorophyll_elevated
+            and algal_elevated
+        ):
             explanations.append(AnomalyTaxonomy.COMPOUND_CHLOROPHYLL_ALGAL)
 
         # Weighted composite anomaly score
