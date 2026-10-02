@@ -292,7 +292,15 @@ class WaterNetSegmenter:
             ):
                 keep_labels[label_id] = True
 
-        return keep_labels[labeled]
+        result = keep_labels[labeled]
+
+        # Remove only the one-pixel morphological halo around the expected
+        # footprint. Larger genuine shoreline expansion remains allowed.
+        outside_result = result & ~expected_mask
+        one_pixel_halo = ndimage.binary_dilation(expected_mask, iterations=1)
+        result &= ~(outside_result & one_pixel_halo)
+
+        return result
 
     def _adaptive_fragmentation_refine(
         self,
@@ -314,8 +322,14 @@ class WaterNetSegmenter:
             return mask
 
         candidates = []
-        for kernel_size in (5, 7, 9):
-            structure = np.ones((kernel_size, kernel_size), dtype=bool)
+        structures = [
+            np.ones((5, 5), dtype=bool),
+            np.ones((7, 7), dtype=bool),
+            np.ones((9, 9), dtype=bool),
+            np.ones((1, 9), dtype=bool),
+            np.ones((9, 1), dtype=bool),
+        ]
+        for structure in structures:
             candidate = ndimage.binary_closing(
                 mask,
                 structure=structure,
