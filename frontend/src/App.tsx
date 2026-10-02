@@ -691,7 +691,7 @@ function OverviewPage() {
           {observations.loading ? <LoadingRows count={4} /> :
             observations.data?.length === 0 ? <EmptyState title="No observations available" text="Observation rows will appear here once satellite scenes are ingested." icon={<Satellite size={20} />} /> :
             <div className="quality-list">
-              {observations.data.slice(0, 6).map((observation) => (
+              {(observations.data ?? []).slice(0, 6).map((observation) => (
                 <div className="quality-row" key={observation.id}>
                   <div className="quality-symbol"><Cloud size={15} /></div>
                   <div>
@@ -974,7 +974,7 @@ function AlertsPage() {
           <div className="panel-header"><div><div className="panel-kicker">ALERT QUEUE</div><div className="panel-title">Detected events</div></div><div className="table-note">GET /alerts</div></div>
           {alerts.loading ? <LoadingRows count={7} /> : alerts.error ? <ErrorState message={alerts.error} /> : alerts.data?.length === 0 ? <EmptyState title="No alerts returned" text="The selected filters did not return any alert records." icon={<Bell size={20} />} /> :
             <div className="table-scroll"><table><thead><tr><th>Date</th><th>Water body</th><th>Indicator</th><th>Severity</th><th>Confidence</th><th>Area</th><th></th></tr></thead><tbody>
-              {alerts.data.map((alert) => <tr className={selectedAlertId === alert.id ? "selected-row" : ""} key={alert.id}><td>{formatDateShort(alert.date)}</td><td>{waterBodies.data?.find((wb) => wb.id === alert.water_body_id)?.name ?? `#${alert.water_body_id}`}</td><td>{alert.indicator}</td><td><span className={severityClass(alert.severity)}>{alert.severity}</span></td><td>{percentOrDash(alert.confidence)}</td><td>{alert.affected_area_km2 == null ? "—" : `${alert.affected_area_km2.toFixed(2)} km²`}</td><td><button className="icon-button" onClick={() => setSearchParams({ alert: String(alert.id) })}><ChevronRight size={15} /></button></td></tr>)}
+              {(alerts.data ?? []).map((alert) => <tr className={selectedAlertId === alert.id ? "selected-row" : ""} key={alert.id}><td>{formatDateShort(alert.date)}</td><td>{waterBodies.data?.find((wb) => wb.id === alert.water_body_id)?.name ?? `#${alert.water_body_id}`}</td><td>{alert.indicator}</td><td><span className={severityClass(alert.severity)}>{alert.severity}</span></td><td>{percentOrDash(alert.confidence)}</td><td>{alert.affected_area_km2 == null ? "—" : `${alert.affected_area_km2.toFixed(2)} km²`}</td><td><button className="icon-button" onClick={() => setSearchParams({ alert: String(alert.id) })}><ChevronRight size={15} /></button></td></tr>)}
             </tbody></table></div>}
         </section>
 
@@ -1072,7 +1072,7 @@ function ObservationsPage() {
         <section className="panel">
           <div className="panel-header"><div><div className="panel-kicker">SCENE REGISTRY</div><div className="panel-title">Satellite observations</div></div><div className="table-note">GET /satellite-observations</div></div>
           {observations.loading ? <LoadingRows count={7} /> : observations.error ? <ErrorState message={observations.error} /> : observations.data?.length === 0 ? <EmptyState title="No observations" text="No satellite scenes match the selected water body." icon={<Satellite size={20} />} /> :
-            <div className="table-scroll"><table><thead><tr><th>Date</th><th>Water body</th><th>Satellite</th><th>Scene ID</th><th>Cloud</th><th>Quality</th><th></th></tr></thead><tbody>{observations.data.map((observation) => <tr className={selected?.id === observation.id ? "selected-row" : ""} key={observation.id}><td>{formatDateShort(observation.observation_date)}</td><td>{waterBodies.data?.find((wb) => wb.id === observation.water_body_id)?.name ?? `#${observation.water_body_id}`}</td><td>{observation.satellite}</td><td className="mono">{observation.scene_id}</td><td>{observation.cloud_percentage == null ? "—" : `${observation.cloud_percentage.toFixed(1)}%`}</td><td>{numberOrDash(observation.quality_score)}</td><td><button className="icon-button" onClick={() => setSelected(observation)}><ChevronRight size={15} /></button></td></tr>)}</tbody></table></div>}
+            <div className="table-scroll"><table><thead><tr><th>Date</th><th>Water body</th><th>Satellite</th><th>Scene ID</th><th>Cloud</th><th>Quality</th><th></th></tr></thead><tbody>{(observations.data ?? []).map((observation) => <tr className={selected?.id === observation.id ? "selected-row" : ""} key={observation.id}><td>{formatDateShort(observation.observation_date)}</td><td>{waterBodies.data?.find((wb) => wb.id === observation.water_body_id)?.name ?? `#${observation.water_body_id}`}</td><td>{observation.satellite}</td><td className="mono">{observation.scene_id}</td><td>{observation.cloud_percentage == null ? "—" : `${observation.cloud_percentage.toFixed(1)}%`}</td><td>{numberOrDash(observation.quality_score)}</td><td><button className="icon-button" onClick={() => setSelected(observation)}><ChevronRight size={15} /></button></td></tr>)}</tbody></table></div>}
         </section>
 
         <aside className="panel observation-detail">
